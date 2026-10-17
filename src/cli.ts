@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 import { Command } from 'commander';
 import { randomUUID } from 'node:crypto';
-import { readFileSync, existsSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { runAudit } from './audit.js';
 import { loadConfig, repoConfig } from './config.js';
@@ -11,7 +11,8 @@ import { refreshSnapshots, renderInbox } from './inbox.js';
 import { Db } from './db.js';
 import { issueDir } from './git.js';
 import { expectUser } from './github.js';
-import { approveFollowup, approveProposal, openPr, rejectProposal, runOnce, withLock, type Ctx } from './orchestrator.js';
+import { approveFollowup, approveProposal, editInEditor, openPr, rejectProposal, runOnce, withLock, type Ctx } from './orchestrator.js';
+import { approveDraft } from './outside.js';
 import { sourceDigest } from './watch.js';
 
 const program = new Command('maintainer-bot').option('-c, --config <path>', 'config file', 'config.yaml');
@@ -105,6 +106,15 @@ program.command('status').description('issues, PRs, proposals and pending action
 
 const isAction = (id: string) => /^a\d+$/i.test(id);
 const isProposal = (id: string) => /^p\d+$/i.test(id);
+const isDraft = (id: string) => /^d\d+$/i.test(id);
+function showDraft(db: Db, id: number) {
+  const d = db.draft(id);
+  console.log(`d${d.id}  ${d.target === 'pr' ? 'review of PR' : 'triage of issue'} ${d.repo}#${d.number} by @${d.author}  (${d.status})`);
+  console.log(`"${d.title}"\nhttps://github.com/${d.repo}/${d.target === 'pr' ? 'pull' : 'issues'}/${d.number}\n`);
+  console.log(`recommendation: ${d.recommendation}`);
+  console.log(`labels: +${JSON.parse(d.labels_add).join(', ') || '-'}  -${JSON.parse(d.labels_remove).join(', ') || '-'}${d.take ? '   (bot can take it: approve --take)' : ''}`);
+  console.log(`\n--- draft to post\n${d.message}`);
+}
 const numId = (id: string) => Number(id.slice(1));
 function showAction(db: Db, id: number) {
   const a = db.action(id);
@@ -125,6 +135,7 @@ program.command('show <id>').description('an issue (triage, diff, PR draft, agen
   const { db } = ctx();
   if (isAction(id)) return showAction(db, numId(id));
   if (isProposal(id)) return showProposal(db, numId(id));
+  if (isDraft(id)) return showDraft(db, numId(id));
   const i = db.issue(Number(id));
   console.log(`${i.repo}#${i.number} ${i.title}\n${i.url}\nstate: ${i.state}  score: ${i.score}  attempts: ${i.attempts}`);
   if (i.blocked) console.log(`\nBLOCKED: ${i.blocked}`);
@@ -148,8 +159,22 @@ program.command('show <id>').description('an issue (triage, diff, PR draft, agen
 });
 
 /** `approve <id>`: p<n> files a proposal as an issue; a<n> sends a drafted reply/fix/rebase; a dry-run issue id opens its PR. */
-async function approveAny(c: Ctx, id: string, o: { noEdit?: boolean }) {
+async function approveAny(c: Ctx, id: string, o: { noEdit?: boolean; take?: boolean; requestChanges?: boolean }) {
   if (isAction(id)) return approveFollowup(c, numId(id));
+  if (isDraft(id)) {
+    const d = c.db.draft(numId(id));
+    if (d.status !== 'pending') throw new Error(`draft d${d.id} is ${d.status}`);
+    let message = d.message;
+    if (!o.noEdit) {
+      const file = join('data', 'drafts', `d${d.id}.md`);
+      mkdirSync(join('data', 'drafts'), { recursive: true });
+      if (!existsSync(file)) writeFileSync(file, `${d.message}\n`);
+      console.log(`Opening ${file}: this is posted as is${d.target === 'pr' ? ' as a review comment' : ''}.`);
+      editInEditor(file);
+      message = readFileSync(file, 'utf8').trim();
+    }
+    return console.log(await approveDraft(c, d, message, { take: !!o.take, requestChanges: !!o.requestChanges }));
+  }
   if (isProposal(id)) return console.log(await approveProposal(c, numId(id), { edit: !o.noEdit }));
   const i = c.db.issue(Number(id));
   if (i.state === 'reviewed' && i.dry) {
@@ -161,14 +186,17 @@ async function approveAny(c: Ctx, id: string, o: { noEdit?: boolean }) {
   if (a) return approveFollowup(c, a.id);
   throw new Error(`issue ${id} is ${i.state}${i.blocked ? ` (blocked: ${i.blocked})` : ''}; nothing waits for your approval. \`maintainer-bot inbox\` lists what does.`);
 }
-program.command('approve <id>').description('p<n>: open the proposed issue (editor first); a<n>: send a drafted reply/fix/rebase; <id> of a dry-run issue: open its PR')
-  .option('--no-edit', 'file the proposal as written, without the editor')
-  .action((id, o) => approveAny(ctx(), id, { noEdit: o.edit === false }));
+program.command('approve <id>').description('p<n>: open the proposed issue; d<n>: post the triage reply / PR review drafted for someone else; a<n>: send a drafted reply/fix/rebase; <id> of a dry-run issue: open its PR')
+  .option('--no-edit', 'post as written, without the editor')
+  .option('--take', 'd<n> of an issue: also hand it to the bot (adds the ready label)')
+  .option('--request-changes', 'd<n> of a PR: post the review as "request changes" instead of a comment')
+  .action((id, o) => approveAny(ctx(), id, { noEdit: o.edit === false, take: !!o.take, requestChanges: !!o.requestChanges }));
 program.command('reject <id> [reason...]').description('p<n>: drop a proposal (the reason is shown to the next audit); a<n>: discard a drafted action; <id>: drop an issue')
   .action((id, reason) => {
     const { db } = ctx();
     const why = (reason ?? []).join(' ');
     if (isAction(id)) return db.setActionStatus(numId(id), 'rejected');
+    if (isDraft(id)) return db.setDraftStatus(numId(id), 'rejected');
     if (isProposal(id)) { rejectProposal(ctx(), numId(id), why); return; }
     db.skip(Number(id), `rejected by human: ${why || 'no reason'}`);
   });

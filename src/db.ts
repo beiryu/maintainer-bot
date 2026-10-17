@@ -97,6 +97,24 @@ export interface SourceState {
   checked_at: string;
 }
 
+/** A reply the bot drafted for someone else's issue or PR; posted only after `approve d<n>`. */
+export interface Draft {
+  id: number;
+  repo: string;
+  target: 'issue' | 'pr';
+  number: number;
+  title: string;
+  author: string;
+  head_sha: string | null;     // pr: the commit reviewed
+  message: string;             // comment or review body
+  labels_add: string;          // JSON string[]
+  labels_remove: string;       // JSON string[]
+  recommendation: string;      // issue: take | info | duplicate | decline | discuss; pr: merge | changes | discuss | close
+  take: number;                // issue: the bot could implement it once approved
+  status: 'pending' | 'done' | 'rejected';
+  created_at: string;
+}
+
 export interface PendingAction {
   id: number;
   issue_id: number;
@@ -200,6 +218,22 @@ CREATE TABLE IF NOT EXISTS sources (
   digest        TEXT,
   checked_at    TEXT NOT NULL,
   PRIMARY KEY (repo, name)
+);
+CREATE TABLE IF NOT EXISTS drafts (
+  id             INTEGER PRIMARY KEY,
+  repo           TEXT NOT NULL,
+  target         TEXT NOT NULL,
+  number         INTEGER NOT NULL,
+  title          TEXT NOT NULL DEFAULT '',
+  author         TEXT NOT NULL DEFAULT '',
+  head_sha       TEXT,
+  message        TEXT NOT NULL,
+  labels_add     TEXT NOT NULL DEFAULT '[]',
+  labels_remove  TEXT NOT NULL DEFAULT '[]',
+  recommendation TEXT NOT NULL DEFAULT '',
+  take           INTEGER NOT NULL DEFAULT 0,
+  status         TEXT NOT NULL DEFAULT 'pending',
+  created_at     TEXT NOT NULL
 );
 CREATE TABLE IF NOT EXISTS kv (key TEXT PRIMARY KEY, value TEXT);
 `;
@@ -384,6 +418,28 @@ export class Db {
       this.sql.prepare(`UPDATE proposals SET ${keys.map((k) => `${k} = @${k}`).join(', ')} WHERE id = @id`).run({ ...fields, id });
     }
     return this.proposal(id);
+  }
+
+  // --- drafts for other people's issues and PRs ---
+  addDraft(d: Omit<Draft, 'id' | 'status' | 'created_at'>): number {
+    return Number(this.sql.prepare(
+      `INSERT INTO drafts (repo, target, number, title, author, head_sha, message, labels_add, labels_remove, recommendation, take, created_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    ).run(d.repo, d.target, d.number, d.title, d.author, d.head_sha, d.message, d.labels_add, d.labels_remove, d.recommendation, d.take, now()).lastInsertRowid);
+  }
+  draft(id: number): Draft {
+    const row = this.sql.prepare('SELECT * FROM drafts WHERE id = ?').get(id) as Draft | undefined;
+    if (!row) throw new Error(`no draft with id ${id}`);
+    return row;
+  }
+  drafts(status: Draft['status'] = 'pending'): Draft[] {
+    return this.sql.prepare('SELECT * FROM drafts WHERE status = ? ORDER BY id').all(status) as Draft[];
+  }
+  pendingDraftFor(repo: string, target: Draft['target'], number: number): Draft | undefined {
+    return this.sql.prepare(`SELECT * FROM drafts WHERE repo = ? AND target = ? AND number = ? AND status = 'pending'`).get(repo, target, number) as Draft | undefined;
+  }
+  setDraftStatus(id: number, status: Draft['status']) {
+    this.sql.prepare('UPDATE drafts SET status = ? WHERE id = ?').run(status, id);
   }
 
   // --- upstream sources ---

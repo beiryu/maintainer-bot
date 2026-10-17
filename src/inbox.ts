@@ -16,6 +16,7 @@ const pad = (s: string, n: number) => s.padEnd(n);
 /** The command the human types for each pending decision. One place to change when the CLI does. */
 export const cmd = {
   proposal: (id: number) => `approve p${id}`,
+  draft: (id: number) => `approve d${id}`,
   pr: (id: number) => `approve ${id}`,
   followup: (id: number) => `approve a${id}`,
   doctor: (repo: string) => `repo doctor ${repo} --fix`,
@@ -29,6 +30,11 @@ export function needsYou(db: Db, cfg: Config): string[] {
       ? `  (đã có: ${[p.covers_issue ? `#${p.covers_issue}` : '', p.covers_rm ?? ''].filter(Boolean).join(', ')})` : '';
     out.push(`  ${pad(cmd.proposal(p.id), 14)} ${pad(`[${p.kind}]`, 13)} ${short(p.repo)}  "${p.title.slice(0, 60)}"${covered}  (${ago(p.created_at)})`
       + (p.rationale ? `\n${' '.repeat(29)}${p.rationale.slice(0, 110)}` : ''));
+  }
+  for (const d of db.drafts('pending')) {
+    const what = d.target === 'pr' ? `PR #${d.number}` : `#${d.number}`;
+    out.push(`  ${pad(cmd.draft(d.id), 14)} ${pad(d.target === 'pr' ? 'review' : 'triage', 13)} ${short(d.repo)} ${what} @${d.author}  "${d.title.slice(0, 45)}"  (${ago(d.created_at)})`
+      + `\n${' '.repeat(29)}→ ${d.recommendation.split('\n')[0].slice(0, 100)}${d.take ? '  (thêm --take để bot làm)' : ''}`);
   }
   for (const i of db.allIssues().filter((i) => i.state === 'reviewed' && i.dry)) {
     out.push(`  ${pad(cmd.pr(i.id), 14)} ${pad('PR (dry)', 13)} ${short(i.repo)}#${i.number}  "${(i.pr_title ?? i.title).slice(0, 50)}"  (${ago(i.updated_at)})`);

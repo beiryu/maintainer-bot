@@ -79,6 +79,30 @@ export const AGENTS = {
       summary: z.string().default(''),
     }),
   },
+  // Someone else opened an issue: labels, a reply in their language, whether the bot can take it.
+  'maintainer-triage': {
+    access: READ, maxTurns: 20,
+    schema: z.object({
+      labels_add: z.array(z.string()).default([]),
+      labels_remove: z.array(z.string()).default([]),
+      duplicate_of: z.number().nullable().default(null),
+      recommendation: z.enum(['take', 'info', 'duplicate', 'decline', 'discuss']),
+      take: z.boolean().default(false),
+      reply: z.string(),
+      reason: z.string().default(''),
+    }),
+  },
+  // Someone else opened a PR: a review comment and a merge recommendation. Never approves.
+  'pr-reviewer': {
+    access: READ, maxTurns: 30,
+    schema: z.object({
+      summary: z.string(),
+      findings: z.array(z.object({ path: z.string(), line: z.number().nullable().default(null), text: z.string() })).default([]),
+      recommendation: z.enum(['merge', 'changes', 'discuss', 'close']),
+      labels_add: z.array(z.string()).default([]),
+      reply: z.string(),
+    }),
+  },
   // Drafts a repo's config from its docs and the facts `repo add` gathered.
   scout: {
     access: READ, maxTurns: 25,

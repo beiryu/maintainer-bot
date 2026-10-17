@@ -30,7 +30,9 @@ describe('inbox', () => {
     db.transition(id(4), 'claimed');
     const p = db.addProposal({ repo: 'o/r', kind: 'gap', title: 'core: negative amounts unhandled', body: 'b', labels: '["type: bug"]', rationale: 'because', evidence: '[]', covers_issue: null, covers_rm: 'RM-013', run_id: null });
 
+    const d = db.addDraft({ repo: 'o/r', target: 'pr', number: 31, title: 'feat(core): x', author: 'someone', head_sha: 'abc', message: 'thanks', labels_add: '[]', labels_remove: '[]', recommendation: 'changes: tests miss the error path', take: 0 });
     const todo = needsYou(db, cfg);
+    expect(todo.some((l) => l.includes(`approve d${d} `) && l.includes('PR #31 @someone') && l.includes('→ changes: tests miss'))).toBe(true);
     expect(todo.some((l) => l.includes(`approve p${p} `) && l.includes('negative amounts') && l.includes('RM-013'))).toBe(true);
     expect(todo.some((l) => l.includes(`approve ${id(1)} `) && l.includes('fix(x): thing'))).toBe(true);
     expect(todo.some((l) => l.includes(`approve a${a} `) && l.includes('rebase'))).toBe(true);
@@ -62,6 +64,25 @@ describe('proposals', () => {
     expect(db.proposals('pending')).toEqual([]);
     expect(db.proposal(a).reject_reason).toBe('already fine');
     expect(db.proposal(b).issue_number).toBe(9);
+  });
+});
+
+describe('outside contributions', () => {
+  it('tells the maintainer apart from everyone else, case-insensitively', async () => {
+    const { isOutsider } = await import('../src/outside.js');
+    expect(isOutsider('someone', 'beiryu')).toBe(true);
+    expect(isOutsider('Beiryu', 'beiryu')).toBe(false);
+    expect(isOutsider(undefined, 'beiryu')).toBe(false);
+  });
+  it('keeps one pending draft per issue or PR until it is sent or dropped', () => {
+    const db = new Db(':memory:');
+    const base = { repo: 'o/r', target: 'issue' as const, number: 5, title: 't', author: 'x', head_sha: null, message: 'm', labels_add: '["type: bug"]', labels_remove: '[]', recommendation: 'take', take: 1 };
+    const id = db.addDraft(base);
+    expect(db.pendingDraftFor('o/r', 'issue', 5)?.id).toBe(id);
+    expect(db.pendingDraftFor('o/r', 'pr', 5)).toBeUndefined();
+    db.setDraftStatus(id, 'done');
+    expect(db.pendingDraftFor('o/r', 'issue', 5)).toBeUndefined();
+    expect(db.drafts('done').map((d) => d.take)).toEqual([1]);
   });
 });
 

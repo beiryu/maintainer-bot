@@ -19,7 +19,12 @@ repo mirror ─(auditor)──────────────┴▶ proposa
 open issue for the bot ─▶ claimed ─▶ reproduced ─▶ coded ─▶ gated ─▶ reviewed ─▶ pr_open ─(you merge)─▶ done
                            labels: ready → working → pr-open | needs-human (+ comment) when it gives up
 open PR: CI failed / review comments / behind base ─(followup agent)─▶ drafted fix, reply or rebase ─(approve a<n>)─▶ pushed
+someone else's issue ─(maintainer-triage)─▶ draft d<n>: labels + reply ─(approve d<n> [--take])─▶ posted [+ ready label → pipeline]
+someone else's PR ─(gate in sandbox + pr-reviewer)─▶ draft d<n>: review + recommendation ─(approve d<n> [--request-changes])─▶ posted
 ```
+
+Other people's issues are never worked on until you take them; their PRs are reviewed once
+per head commit, the review is a comment or "request changes", never an approval.
 
 Gate fail or reviewer reject → back to `reproduced` (or `claimed` when the test itself is
 wrong), at most `limits.max_attempts` times; then the issue is handed back with the reason.
@@ -58,6 +63,7 @@ opened, mirroring the repo's PR lint), `issue_labels_default`, `labels_lifecycle
 | `show p<n> / a<n> / <id>` | a proposal, a drafted action, an issue with its diff and agent log |
 | `approve p<n> [--no-edit]` | opens the issue (editor first, title on line 1) and queues it |
 | `reject p<n> [reason]` | drops the proposal; the reason is shown to the next audit |
+| `approve d<n> [--take] [--request-changes]` / `reject d<n>` | post or drop the triage reply / PR review drafted for someone else's issue or PR |
 | `approve a<n>` / `reject a<n>` | send or discard a drafted reply/fix/rebase on an open PR |
 | `repo add|remove|list|doctor` | per-repo config |
 | `cost` | spend by agent |

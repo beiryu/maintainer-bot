@@ -16,6 +16,7 @@ import {
 } from './git.js';
 import * as gh from './github.js';
 import { notify } from './notify.js';
+import { reviewOutsidePrs, triageOutsideIssues } from './outside.js';
 import { markDone, rmIdFromTitle } from './roadmap.js';
 import { runInSandbox, tail } from './sandbox.js';
 import { sourceDigest } from './watch.js';
@@ -86,7 +87,21 @@ export async function runOnce(ctx: Ctx, opts: RunOpts) {
     }
   }
 
-  // 2. Audit: what changed upstream, then what the repo is missing. Proposals wait in the inbox.
+  // 2. Other people's new issues and PRs: draft a triage reply / review for the inbox.
+  if (!opts.triageOnly && !opts.issue && audit !== 'only' && !opts.dry) {
+    for (const rc of cfg.repos) {
+      if (!active(rc.full_name) || (opts.repo && rc.full_name !== opts.repo)) continue;
+      for (const step of [triageOutsideIssues, reviewOutsidePrs]) {
+        try {
+          events.push(...await step(ctx, rc, log));
+        } catch (e) {
+          events.push(`${rc.full_name}: ${step.name} failed: ${(e as Error).message.slice(0, 300)}`);
+        }
+      }
+    }
+  }
+
+  // 3. Audit: what changed upstream, then what the repo is missing. Proposals wait in the inbox.
   if (!opts.triageOnly && !opts.issue && audit !== 'skip') {
     for (const rc of cfg.repos) {
       if (!active(rc.full_name) || (opts.repo && rc.full_name !== opts.repo)) continue;
@@ -101,7 +116,7 @@ export async function runOnce(ctx: Ctx, opts: RunOpts) {
     }
   }
 
-  // 3. Find work: a specific issue, or the open issues labelled for the bot.
+  // 4. Find work: a specific issue, or the open issues labelled for the bot.
   if (audit !== 'only') {
     if (opts.issue && opts.repo) {
       if (!active(opts.repo)) throw new Error(`${opts.repo} is not active`);
@@ -121,7 +136,7 @@ export async function runOnce(ctx: Ctx, opts: RunOpts) {
     }
   }
 
-  // 4. Advance in-progress issues.
+  // 5. Advance in-progress issues.
   const candidates = opts.triageOnly || audit === 'only' ? [] : opts.issue && opts.repo
     ? [db.issueByNumber(opts.repo, opts.issue)].filter((i): i is Issue => !!i)
     : db.nextIssues(opts.repo);
@@ -218,6 +233,11 @@ export async function unavailable(rc: RepoConfig, gi: gh.GhIssue & { state?: str
   if (rc.labels.length && !rc.labels.some((l) => names.includes(l))) return 'no wanted label';
   const skip = rc.skip_labels.find((l) => names.includes(l));
   if (skip) return `label "${skip}"`;
+  // Someone else's issue waits for the maintainer to take it (`approve d<n> --take` adds the ready label).
+  const ready = rc.labels_lifecycle.ready;
+  if (gi.author && gi.author.login.toLowerCase() !== (await gh.currentUser()).toLowerCase() && !(ready && names.includes(ready))) {
+    return 'opened by someone else, not taken yet';
+  }
   if (await gh.linkedOpenPrCount(rc.full_name, gi.number) > 0) return 'has an open linked PR';
   return null;
 }

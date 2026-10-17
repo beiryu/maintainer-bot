@@ -29,6 +29,7 @@ export interface GhIssue {
   createdAt: string;
   labels: { name: string }[];
   assignees: { login: string }[];
+  author?: { login: string } | null;
 }
 
 let me: string | undefined;
@@ -80,7 +81,7 @@ export async function gitIdentity(signingKey?: string): Promise<string[]> {
 
 export function listOpenIssues(repo: string, labels: string[], limit = 500): Promise<GhIssue[]> {
   const args = ['issue', 'list', '-R', repo, '--state', 'open', '--limit', String(limit),
-    '--json', 'number,title,body,url,createdAt,labels,assignees'];
+    '--json', 'number,title,body,url,createdAt,labels,assignees,author'];
   // gh ANDs repeated --label flags, so with several labels we filter client-side instead.
   if (labels.length === 1) args.push('--label', labels[0]);
   return ghJson<GhIssue[]>(args);
@@ -88,7 +89,7 @@ export function listOpenIssues(repo: string, labels: string[], limit = 500): Pro
 
 export async function getIssue(repo: string, number: number): Promise<GhIssue & { state: string }> {
   return ghJson(['issue', 'view', String(number), '-R', repo,
-    '--json', 'number,title,body,url,createdAt,labels,assignees,state']);
+    '--json', 'number,title,body,url,createdAt,labels,assignees,author,state']);
 }
 
 /** Open PRs that close or reference the issue: someone is probably already on it. */
