@@ -188,7 +188,7 @@ async function approveAny(c: Ctx, id: string, o: { noEdit?: boolean; take?: bool
 }
 program.command('approve <id>').description('p<n>: open the proposed issue; d<n>: post the triage reply / PR review drafted for someone else; a<n>: send a drafted reply/fix/rebase; <id> of a dry-run issue: open its PR')
   .option('--no-edit', 'post as written, without the editor')
-  .option('--take', 'd<n> of an issue: also hand it to the bot (adds the ready label)')
+  .option('--take', 'd<n> of an issue: also assign it to you, so the next run implements it')
   .option('--request-changes', 'd<n> of a PR: post the review as "request changes" instead of a comment')
   .action((id, o) => approveAny(ctx(), id, { noEdit: o.edit === false, take: !!o.take, requestChanges: !!o.requestChanges }));
 program.command('reject <id> [reason...]').description('p<n>: drop a proposal (the reason is shown to the next audit); a<n>: discard a drafted action; <id>: drop an issue')
@@ -199,6 +199,20 @@ program.command('reject <id> [reason...]').description('p<n>: drop a proposal (t
     if (isDraft(id)) return db.setDraftStatus(numId(id), 'rejected');
     if (isProposal(id)) { rejectProposal(ctx(), numId(id), why); return; }
     db.skip(Number(id), `rejected by human: ${why || 'no reason'}`);
+  });
+
+program.command('take <number>').description('assign an open issue to you, so the next run implements it')
+  .option('--repo <owner/name>', 'defaults to the only configured repo')
+  .action(async (number, o) => {
+    const c = ctx();
+    const repo = o.repo ?? (c.cfg.repos.length === 1 ? c.cfg.repos[0].full_name : undefined);
+    if (!repo) throw new Error('several repos are configured; pass --repo');
+    const { assign } = await import('./github.js');
+    await assign(repo, Number(number), c.cfg.github_user);
+    const prev = c.db.issueByNumber(repo, Number(number));
+    // Taken again after the bot stopped on it: let the next run start over.
+    if (prev?.state === 'skipped') { c.db.update(prev.id, { state: 'discovered', skip_reason: null, attempts: 0, feedback: null, blocked: null }); c.db.set(`handed-back:${prev.id}`, null); }
+    console.log(`${repo}#${number} assigned to ${c.cfg.github_user}; the next run works on it.`);
   });
 
 program.command('pause').description('stop runs until resume').action(() => ctx().db.set('paused', '1'));

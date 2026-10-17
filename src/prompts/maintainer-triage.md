@@ -33,7 +33,8 @@ Comments so far:
 Decide:
 - recommendation:
   - "take": a clear bug or a small, well-defined request that fits the project's scope and
-    rules; it can be implemented from what the issue and the repository say. Set take=true.
+    rules; it can be implemented from what the issue and the repository say. Set take=true
+    (the maintainer may then assign it to themselves).
   - "info": something essential is missing (version, input, expected vs actual, a source for
     a domain fact). The reply asks for exactly that, nothing more.
   - "duplicate": an open issue already covers it; set duplicate_of.
@@ -43,12 +44,12 @@ Decide:
   - "discuss": a real proposal the maintainer must decide on; the reply acknowledges it and
     says what the maintainer will need to weigh, without promising anything.
 - labels_add / labels_remove: type, area, priority, size labels from the list above; remove a
-  "needs-triage" style label if you added the real ones. Never add labels that hand the issue
-  to an automated implementer; the maintainer does that.
+  "needs-triage" style label if you added the real ones. Never add process labels such as
+  `agent: …`; the maintainer takes an issue by assigning it.
 - reply: in the language the reporter wrote in (Vietnamese or English), short and concrete,
   as the maintainer would write it. Thank them once, at most. Never claim something was
-  checked or fixed if you did not verify it in the code. No AI disclosure line; the
-  maintainer edits and sends it.
+  checked or fixed if you did not verify it in the code. Write as the maintainer: no mention of
+  bots, automation or AI. The maintainer edits and sends it.
 
 End your answer with exactly one JSON block:
 ```json

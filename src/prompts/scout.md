@@ -28,10 +28,8 @@ these fields (leave a field out to keep its default):
   data files that a script produces.
 - roadmap_file: the roadmap the owner maintains (e.g. ROADMAP.md), if any.
 - pr_types / pr_scopes: the Conventional Commits types and scopes the repo's PR lint accepts.
-- issue_labels_default: labels for issues the bot opens (e.g. the label that hands an issue
-  to the implementer, if the repo has such a label).
-- labels_lifecycle: {ready, working, pr_open, needs_human} — the repo's labels for those
-  states, if it has them; otherwise leave it out.
+- pick: "assigned" (the owner takes an issue by assigning it to themselves; the bot works only
+  on assigned issues) unless the owner wants every open issue worked on ("any").
 - audit_files: files the auditor should read in full (README, CONTRIBUTING, AGENTS, docs index).
 - sources: upstream data the repo is built from, if its docs pin them (name, kind "github",
   repo "owner/name", pinned_from: the file holding the pinned commit, paths: dirs that matter).
@@ -46,7 +44,7 @@ Also write:
 - summary: 5-10 lines for the owner: what the gate covers, what the bot will and will not touch.
 - risks: things that could make this repo awkward for the bot (slow build, network in tests,
   generated files, no PR lint...).
-- manual_steps: what the owner must do themselves (create labels, disable an old workflow,
+- manual_steps: what the owner must do themselves (disable an old workflow,
   set a branch rule...). Empty if nothing.
 
 Plain factual English. End your answer with exactly one JSON block:

@@ -113,9 +113,10 @@ export async function commentOnIssue(repo: string, number: number, body: string)
 
 // ---- maintainer operations on the user's own repos
 
-export async function createIssue(repo: string, o: { title: string; body: string; labels?: string[] }): Promise<{ url: string; number: number }> {
+export async function createIssue(repo: string, o: { title: string; body: string; labels?: string[]; assignees?: string[] }): Promise<{ url: string; number: number }> {
   const args = ['issue', 'create', '-R', repo, '--title', o.title, '--body-file', '-'];
   for (const l of o.labels ?? []) args.push('--label', l);
+  for (const a of o.assignees ?? []) args.push('--assignee', a);
   const url = (await gh(args, o.body, false)).trim().split('\n').pop()!;
   return { url, number: Number(url.split('/').pop()) };
 }
@@ -128,6 +129,10 @@ export async function addLabels(repo: string, number: number, labels: string[]) 
 export async function removeLabels(repo: string, number: number, labels: string[]) {
   const rm = labels.filter(Boolean);
   if (rm.length) await gh(['issue', 'edit', String(number), '-R', repo, ...rm.flatMap((l) => ['--remove-label', l])], undefined, false);
+}
+
+export async function assign(repo: string, number: number, login: string) {
+  await gh(['issue', 'edit', String(number), '-R', repo, '--add-assignee', login], undefined, false);
 }
 
 export async function closeIssue(repo: string, number: number, comment?: string) {

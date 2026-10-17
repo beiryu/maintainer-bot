@@ -12,7 +12,7 @@ import { runInSandbox, tail } from './sandbox.js';
 
 // Issues and PRs opened by other people. The bot drafts what the maintainer would post (a
 // triage reply with labels, a PR review with a recommendation); nothing reaches GitHub until
-// `approve d<n>`. Their issues are not worked on until the maintainer takes them.
+// `approve d<n>`. Their issues are not worked on until the maintainer assigns them (`--take`).
 
 const untrusted = (s: string) => s.replace(/<\/?untrusted/gi, '&lt;untrusted').slice(0, 20_000);
 
@@ -135,8 +135,7 @@ export async function approveDraft(ctx: Ctx, d: Draft, message: string, opts: { 
   const rc = cfg.repos.find((r) => r.full_name === d.repo);
   if (!rc) throw new Error(`${d.repo} is not configured`);
   const existing = new Set(await repoLabels(d.repo));
-  const add = [...JSON.parse(d.labels_add) as string[], ...(opts.take && rc.labels_lifecycle.ready ? [rc.labels_lifecycle.ready] : [])]
-    .filter((l) => existing.has(l));
+  const add = (JSON.parse(d.labels_add) as string[]).filter((l) => existing.has(l) && !/^agent\b/i.test(l));
   const remove = (JSON.parse(d.labels_remove) as string[]).filter((l) => existing.has(l));
   if (d.target === 'issue') {
     if (message) await gh.commentOnIssue(d.repo, d.number, message);
@@ -146,6 +145,8 @@ export async function approveDraft(ctx: Ctx, d: Draft, message: string, opts: { 
   }
   await gh.removeLabels(d.repo, d.number, remove).catch(() => undefined);
   await gh.addLabels(d.repo, d.number, add).catch(() => undefined);
+  // Taking an issue is assigning it to yourself, as any maintainer would; the next run implements it.
+  if (opts.take && d.target === 'issue') await gh.assign(d.repo, d.number, cfg.github_user);
   db.setDraftStatus(d.id, 'done');
   return `${d.target === 'issue' ? 'Commented on' : opts.requestChanges ? 'Requested changes on' : 'Reviewed'} ${d.repo}#${d.number}`
     + `${add.length ? ` [+${add.join(', ')}]` : ''}${opts.take ? '; the next run works on it' : ''}`;

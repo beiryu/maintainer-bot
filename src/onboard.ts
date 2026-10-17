@@ -16,12 +16,12 @@ import { editInEditor, type Ctx } from './orchestrator.js';
 export function normalizeScoutConfig(raw: Record<string, unknown>): Record<string, unknown> {
   const out = { ...raw };
   if (Array.isArray(out.notes)) out.notes = out.notes.map(String).join('\n');
-  for (const k of ['labels', 'skip_labels', 'forbidden_paths', 'allowed_paths', 'gate', 'review_bots', 'pr_types', 'pr_scopes', 'issue_labels_default', 'audit_files']) {
+  for (const k of ['labels', 'skip_labels', 'forbidden_paths', 'allowed_paths', 'gate', 'review_bots', 'pr_types', 'pr_scopes', 'audit_files']) {
     if (typeof out[k] === 'string') out[k] = [out[k]];
   }
   for (const k of ['focused_test', 'roadmap_file']) if (out[k] === null || out[k] === '') delete out[k];
   // Fields from the contributor-side scout that mean nothing here.
-  for (const k of ['fork', 'claim_comment', 'require_assignment', 'max_issue_age_days', 'draft_replies']) delete out[k];
+  for (const k of ['fork', 'claim_comment', 'require_assignment', 'max_issue_age_days', 'draft_replies', 'issue_labels_default', 'labels_lifecycle']) delete out[k];
   return out;
 }
 

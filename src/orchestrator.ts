@@ -223,21 +223,24 @@ async function discoverAndTriage(ctx: Ctx, rc: RepoConfig, triageOnly = false): 
 }
 
 /**
- * Reason an issue is not for the bot, or null. On the maintainer's own repo an open issue
- * is work unless a label says otherwise or someone already has a PR for it; age and
- * assignees do not matter.
+ * Reason an issue is not for the bot, from what the issue itself says, or null. The maintainer
+ * takes an issue the way any maintainer does, by assigning it to themselves; who opened it
+ * does not matter once it is assigned.
  */
-export async function unavailable(rc: RepoConfig, gi: gh.GhIssue & { state?: string }): Promise<string | null> {
+export function pickReason(rc: RepoConfig, gi: gh.GhIssue & { state?: string }, me: string): string | null {
   if (gi.state && gi.state !== 'OPEN') return 'issue closed';
   const names = gi.labels.map((l) => l.name);
   if (rc.labels.length && !rc.labels.some((l) => names.includes(l))) return 'no wanted label';
   const skip = rc.skip_labels.find((l) => names.includes(l));
   if (skip) return `label "${skip}"`;
-  // Someone else's issue waits for the maintainer to take it (`approve d<n> --take` adds the ready label).
-  const ready = rc.labels_lifecycle.ready;
-  if (gi.author && gi.author.login.toLowerCase() !== (await gh.currentUser()).toLowerCase() && !(ready && names.includes(ready))) {
-    return 'opened by someone else, not taken yet';
-  }
+  if (rc.pick === 'assigned' && !gi.assignees.some((a) => a.login.toLowerCase() === me.toLowerCase())) return 'not assigned to you';
+  return null;
+}
+
+/** pickReason, plus an open PR already linked to the issue. */
+export async function unavailable(rc: RepoConfig, gi: gh.GhIssue & { state?: string }): Promise<string | null> {
+  const why = pickReason(rc, gi, await gh.currentUser());
+  if (why) return why;
   if (await gh.linkedOpenPrCount(rc.full_name, gi.number) > 0) return 'has an open linked PR';
   return null;
 }
@@ -265,10 +268,10 @@ async function triage(ctx: Ctx, rc: RepoConfig, issue: Issue): Promise<Issue> {
   }
 }
 
-/** Takes the repo's pipeline slot: no claim on your own repo, the label says the bot is on it. */
+/** Takes the repo's pipeline slot. Nothing changes on GitHub: the issue is already assigned. */
 async function promote(ctx: Ctx, rc: RepoConfig, issue: Issue): Promise<string | null> {
+  void rc;
   ctx.db.transition(issue.id, 'claimed');
-  await setLifecycle(rc, issue, 'working');
   // What happens to it next (PR opened, skipped) is reported on its own; this alone is noise.
   log(`#${issue.number}: picked`);
   return null;
@@ -306,40 +309,19 @@ async function targetIssue(ctx: Ctx, rc: RepoConfig, number: number, dry: boolea
   return null;
 }
 
-// ---------------------------------------------------------------- labels & hand-back
-
-/** Moves the repo's progress label on the issue, when the repo uses them. Never fatal. */
-async function setLifecycle(rc: RepoConfig, issue: Issue, to: keyof RepoConfig['labels_lifecycle']) {
-  if (issue.dry) return;
-  const lc = rc.labels_lifecycle;
-  const add = lc[to];
-  const remove = Object.entries(lc).filter(([k, v]) => k !== to && v && v !== add).map(([, v]) => v);
-  try {
-    await gh.removeLabels(rc.full_name, issue.number, remove);
-    await gh.addLabels(rc.full_name, issue.number, [add]);
-  } catch (e) {
-    log(`#${issue.number}: could not set labels (${(e as Error).message.split('\n')[0]})`);
-  }
-}
+// ---------------------------------------------------------------- hand-back
 
 /**
- * The bot could not finish an issue: say so on the issue once (the repo's needs-human
- * label plus a short comment), so the maintainer sees it on GitHub as well as in the inbox.
+ * The bot could not finish an issue: tell the maintainer once (notification + inbox). Nothing
+ * is posted on GitHub; the issue stays assigned and the maintainer decides what happens next.
  */
 async function handBack(ctx: Ctx, issue: Issue) {
   const { cfg, db } = ctx;
   if (issue.dry || db.get(`handed-back:${issue.id}`)) return;
-  const rc = repoConfig(cfg, issue.repo);
   db.set(`handed-back:${issue.id}`, new Date().toISOString());
-  await setLifecycle(rc, issue, 'needs_human');
   const why = (issue.blocked ?? issue.skip_reason ?? 'unknown').replace(/\s+/g, ' ').slice(0, 600);
-  try {
-    await gh.commentOnIssue(issue.repo, issue.number,
-      `maintainer-bot could not finish this on its own: ${why}\n\nA person needs to decide how to proceed; `
-      + `\`maintainer-bot run --repo ${issue.repo} --issue ${issue.number}\` tries again.`);
-  } catch (e) {
-    log(`#${issue.number}: could not comment (${(e as Error).message.split('\n')[0]})`);
-  }
+  await notify(cfg, `maintainer-bot: ${issue.url} stopped: ${why}\n`
+    + `Try again: \`maintainer-bot run --repo ${issue.repo} --issue ${issue.number}\`, or unassign it to drop it.`);
 }
 
 // ---------------------------------------------------------------- pipeline
@@ -537,7 +519,9 @@ async function writePr(ctx: Ctx, rc: RepoConfig, issue: Issue) {
   // The disclosure comes from what the runtime reported, never from an agent's own claim.
   const models = ctx.db.modelsForIssue(issue.id);
   const tool = models ? `${rc.agent_disclosure} (model${models.length > 1 ? 's' : ''}: ${models.join(', ')})` : rc.agent_disclosure;
-  const body = `${r.body.trim()}\n\nAI disclosure: this change was drafted with ${tool}; the repository's gate and an automated review ran before it was opened.\n`;
+  const body = rc.agent_disclosure
+    ? `${r.body.trim()}\n\nAI disclosure: this change was drafted with ${tool}.\n`
+    : `${r.body.trim()}\n`;
   ctx.db.update(issue.id, { pr_title: r.title.trim(), pr_body: body });
 }
 
@@ -575,6 +559,13 @@ function retry(ctx: Ctx, issue: Issue, feedback: string, from: 'claimed' | 'repr
 
 // ---------------------------------------------------------------- opening the PR
 
+/** `feat/17-mcp-expose-lunar-tet` from the PR title's type, the issue number and its title. */
+export function branchFor(rc: Pick<RepoConfig, 'branch_prefix' | 'branch_name'>, prTitle: string, number: number, issueTitle: string): string {
+  const type = /^(\w+)(?:\([^)]*\))?!?:/.exec(prTitle.trim())?.[1]?.toLowerCase() ?? 'change';
+  const slug = issueTitle.toLowerCase().replace(/\[rm-\d+\]/g, '').replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '').slice(0, 40).replace(/-$/, '');
+  return rc.branch_prefix + fillTemplate(rc.branch_name, { type, number: String(number), slug });
+}
+
 /**
  * Pushes the gated patch as one signed commit on a branch of the repo itself and opens the
  * PR. When the issue is a roadmap item, a second commit marks it done in the roadmap, so the
@@ -597,8 +588,7 @@ export async function openPr(ctx: Ctx, id: number): Promise<{ url: string; numbe
   let body = issue.pr_body;
 
   // Push from a host-made clone; the agent never had access to this directory.
-  const slug = issue.title.toLowerCase().replace(/\[rm-\d+\]/g, '').replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '').slice(0, 40).replace(/-$/, '');
-  const branch = rc.branch_prefix + fillTemplate(rc.branch_name, { number: String(issue.number), slug });
+  const branch = branchFor(rc, title, issue.number, issue.title);
   const push = join(dir, 'push');
   await freshClone(issue.repo, issue.base_sha!, push);
   await git(push, ['checkout', '-b', branch]);
@@ -645,8 +635,6 @@ export async function openPr(ctx: Ctx, id: number): Promise<{ url: string; numbe
       log(`#${issue.number}: roadmap not updated (${(e as Error).message.split('\n')[0]})`);
     }
   }
-  await setLifecycle(rc, issue, 'pr_open');
-  if (rc.labels_lifecycle.pr_open) await gh.addLabels(issue.repo, pr.number, [rc.labels_lifecycle.pr_open]).catch(() => undefined);
   log(`#${issue.number}: opened ${pr.url}`);
   return pr;
 }
@@ -673,7 +661,8 @@ export async function approveProposal(ctx: Ctx, id: number, opts: { edit: boolea
     if (!title || !body) throw new Error('empty title or body; nothing filed');
   }
   const labels = await labelsFor(rc, JSON.parse(p.labels));
-  const created = await gh.createIssue(p.repo, { title, body, labels });
+  // Assigned to the maintainer: that is what makes it work for the next run.
+  const created = await gh.createIssue(p.repo, { title, body, labels, assignees: [cfg.github_user] });
   db.insertDiscovered({ repo: p.repo, number: created.number, title, body, url: created.url });
   const issue = db.issueByNumber(p.repo, created.number)!;
   // The maintainer just approved it: no triage, straight into the pipeline.

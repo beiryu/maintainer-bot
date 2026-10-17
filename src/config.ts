@@ -24,9 +24,13 @@ const Source = z.object({
 const RepoConfig = z.object({
   full_name: z.string().regex(/^[\w.-]+\/[\w.-]+$/),
   default_branch: z.string().default('main'),
-  branch_prefix: z.string().default('agent/'),
-  // Branch name after the prefix; {{number}} and {{slug}} are filled in.
-  branch_name: z.string().default('{{number}}-{{slug}}'),
+  branch_prefix: z.string().default(''),
+  // Branch name after the prefix; {{type}} (the PR title's Conventional Commit type, e.g. feat),
+  // {{number}} and {{slug}} are filled in.
+  branch_name: z.string().default('{{type}}/{{number}}-{{slug}}'),
+  // Which open issues are work: 'assigned' = assigned to github_user (the maintainer takes an
+  // issue the usual way, by assigning it); 'any' = every open issue not skipped by a label.
+  pick: z.enum(['assigned', 'any']).default('assigned'),
   // Only issues with one of these labels are picked up (empty: any open issue not skipped).
   labels: z.array(z.string()).default([]),
   skip_labels: z.array(z.string()).default([]),
@@ -36,7 +40,8 @@ const RepoConfig = z.object({
   forbidden_paths: z.array(z.string()).default([]),
   // When set, the patch may only touch files under these paths (e.g. one package of a monorepo).
   allowed_paths: z.array(z.string()).default([]),
-  agent_disclosure: z.string().default('GitHub Copilot CLI via maintainer-bot'),
+  // Appended to every PR body when set ('' = none; the repo may state AI use once in its docs instead).
+  agent_disclosure: z.string().default(''),
   // Project conventions the agents must follow beyond what they read in the repo. Also the
   // reviewer's checklist and part of what the auditor measures the repo against.
   notes: z.string().default(''),
@@ -52,13 +57,6 @@ const RepoConfig = z.object({
   // Conventional Commits types/scopes the repo's PR lint accepts; the PR title is checked before opening.
   pr_types: z.array(z.string()).default([]),
   pr_scopes: z.array(z.string()).default([]),
-  // Labels put on every issue the bot opens from an approved proposal.
-  issue_labels_default: z.array(z.string()).default([]),
-  // Labels that track the bot's progress on an issue, if the repo uses them ('' to skip one).
-  labels_lifecycle: z.object({
-    ready: z.string().default(''), working: z.string().default(''),
-    pr_open: z.string().default(''), needs_human: z.string().default(''),
-  }).prefault({}),
   // Files the auditor gets in full (rules, docs, API surface) besides the roadmap; relative to the repo.
   audit_files: z.array(z.string()).default(['README.md', 'CONTRIBUTING.md', 'AGENTS.md']),
   sources: z.array(Source).default([]),

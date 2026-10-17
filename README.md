@@ -15,15 +15,19 @@ opens on its own.
 
 ```
 sources ─(watch)─▶ upstream digest ─┐
-repo mirror ─(auditor)──────────────┴▶ proposal p<n> ─(approve p<n>, editor)─▶ GitHub issue + `agent: ready`
-open issue for the bot ─▶ claimed ─▶ reproduced ─▶ coded ─▶ gated ─▶ reviewed ─▶ pr_open ─(you merge)─▶ done
-                           labels: ready → working → pr-open | needs-human (+ comment) when it gives up
+repo mirror ─(auditor)──────────────┴▶ proposal p<n> ─(approve p<n>, editor)─▶ GitHub issue, assigned to you
+open issue assigned to you ─▶ claimed ─▶ reproduced ─▶ coded ─▶ gated ─▶ reviewed ─▶ pr_open ─(you merge)─▶ done
+                           when it gives up: notification + "dừng lại" in the inbox; nothing is posted on GitHub
 open PR: CI failed / review comments / behind base ─(followup agent)─▶ drafted fix, reply or rebase ─(approve a<n>)─▶ pushed
-someone else's issue ─(maintainer-triage)─▶ draft d<n>: labels + reply ─(approve d<n> [--take])─▶ posted [+ ready label → pipeline]
+someone else's issue ─(maintainer-triage)─▶ draft d<n>: labels + reply ─(approve d<n> [--take])─▶ posted [+ assigned to you → pipeline]
 someone else's PR ─(gate in sandbox + pr-reviewer)─▶ draft d<n>: review + recommendation ─(approve d<n> [--request-changes])─▶ posted
 ```
 
-Other people's issues are never worked on until you take them; their PRs are reviewed once
+Nothing on GitHub marks the bot's work: no process labels, branches named like
+`feat/17-…`, no tool line on PRs (state AI use once in the repo's CONTRIBUTING instead;
+`agent_disclosure` adds a line per PR if you want one). You take an issue the way any
+maintainer does, by assigning it to yourself. Other people's issues are never worked on
+until you take them; their PRs are reviewed once
 per head commit, the review is a comment or "request changes", never an approval.
 
 Gate fail or reviewer reject → back to `reproduced` (or `claimed` when the test itself is
@@ -45,15 +49,15 @@ npm run -s maintainer-bot -- inbox
 ```
 
 Each repo is one file under `repos/`. Besides the gate and conventions it carries the
-maintainer-side settings: `roadmap_file`, `pr_types`/`pr_scopes` (checked before a PR is
-opened, mirroring the repo's PR lint), `issue_labels_default`, `labels_lifecycle`,
-`audit_files`, `sources`. See `repos/beiryu__vn-skills.yaml`.
+maintainer-side settings: `pick` (`assigned` or `any`), `roadmap_file`, `pr_types`/`pr_scopes`
+(checked before a PR is opened, mirroring the repo's PR lint), `audit_files`, `sources`. See `repos/beiryu__vn-skills.yaml`.
 
 ## Daily use
 
 | Command | What it does |
 | --- | --- |
-| `run` | follow up open PRs → watch sources + audit (when due per `audit_interval_hours`) → pick up open issues (labelled for the bot, not skipped, no open PR) → advance → open PRs |
+| `run` | follow up open PRs → other people's issues/PRs → watch sources + audit (when due per `audit_interval_hours`) → pick up open issues assigned to you (not skipped, no open PR) → advance → open PRs |
+| `take <n> [--repo R]` | assign issue #n to you; the next run implements it |
 | `run --repo R --issue N [--dry]` | one issue; `--dry` stops after review, `approve <id>` then opens the PR |
 | `run --triage-only` | score every open issue without working on any |
 | `run --no-audit` / `run --audit-only` | skip or isolate the audit |

@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { layoutSummary, testCounts } from '../src/audit.js';
-import { checkPrTitle } from '../src/orchestrator.js';
+import { branchFor, checkPrTitle, pickReason } from '../src/orchestrator.js';
 import { markDone, parseRoadmap, rmIdFromTitle, roadmapSummary } from '../src/roadmap.js';
 import { lineDiff, pinnedSha } from '../src/watch.js';
 import { mkdtempSync, writeFileSync, mkdirSync } from 'node:fs';
@@ -113,5 +113,32 @@ describe('watch', () => {
   });
   it('diffs lines, not markup', () => {
     expect(lineDiff('a\nb\nc', 'a\nc\nd')).toBe('- b\n+ d');
+  });
+});
+
+describe('picking work like a maintainer', () => {
+  const rc = { labels: [], skip_labels: ['status: blocked'], pick: 'assigned' } as never;
+  const gi = (assignees: string[], labels: string[] = [], state = 'OPEN') =>
+    ({ number: 1, title: 't', body: '', url: '', createdAt: '', state, labels: labels.map((name) => ({ name })), assignees: assignees.map((login) => ({ login })) });
+  it('works only on open issues assigned to the maintainer', () => {
+    expect(pickReason(rc, gi(['beiryu']), 'beiryu')).toBeNull();
+    expect(pickReason(rc, gi(['Beiryu', 'someone']), 'beiryu')).toBeNull();
+    expect(pickReason(rc, gi([]), 'beiryu')).toBe('not assigned to you');
+    expect(pickReason(rc, gi(['someone']), 'beiryu')).toBe('not assigned to you');
+    expect(pickReason(rc, gi(['beiryu'], ['status: blocked']), 'beiryu')).toBe('label "status: blocked"');
+    expect(pickReason(rc, gi(['beiryu'], [], 'CLOSED'), 'beiryu')).toBe('issue closed');
+  });
+  it('takes any open issue with pick: any', () => {
+    expect(pickReason({ ...(rc as object), pick: 'any' } as never, gi([]), 'beiryu')).toBeNull();
+  });
+});
+
+describe('branchFor', () => {
+  const rc = { branch_prefix: '', branch_name: '{{type}}/{{number}}-{{slug}}' };
+  it('names the branch after the PR type, the issue number and its title', () => {
+    expect(branchFor(rc, 'feat(mcp): add tools', 17, 'mcp: expose lunar tet/canchi as MCP tools'))
+      .toBe('feat/17-mcp-expose-lunar-tet-canchi-as-mcp-tools');
+    expect(branchFor(rc, 'fix: off by one', 9, '[RM-013] vn-number: format')).toBe('fix/9-vn-number-format');
+    expect(branchFor(rc, 'Update docs', 3, 'Docs')).toBe('change/3-docs');
   });
 });

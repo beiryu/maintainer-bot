@@ -45,6 +45,11 @@ export function needsYou(db: Db, cfg: Config): string[] {
     const gist = a.kind === 'rebase' ? a.message.split('\n')[0] : a.kind === 'fix' ? 'fix for review comments' : 'reply to review comments';
     out.push(`  ${pad(cmd.followup(a.id), 14)} ${pad(a.kind, 13)} ${short(i.repo)}#${pr?.number ?? i.number}  ${gist.slice(0, 60)}  (${ago(a.created_at)})`);
   }
+  // Stopped by the bot: the maintainer decides (retry, fix by hand, or `reject <id>` to let it go).
+  for (const i of db.issuesInState('skipped').filter((i) => db.get(`handed-back:${i.id}`) && !i.skip_reason?.startsWith('rejected by human'))) {
+    out.push(`  ${pad(`run --issue ${i.number}`, 14)} ${pad('dừng lại', 13)} ${short(i.repo)}#${i.number}  "${i.title.slice(0, 45)}"  (${ago(i.updated_at)})`
+      + `\n${' '.repeat(29)}${(i.skip_reason ?? '').replace(/\s+/g, ' ').slice(0, 110)}`);
+  }
   const blockedRepos = new Map<string, string>();
   for (const i of db.blockedIssues()) if (!blockedRepos.has(i.repo)) blockedRepos.set(i.repo, i.blocked!);
   for (const [repo, why] of blockedRepos) out.push(`  ⚠ ${short(repo)}: ${why.slice(0, 70)}  → ${cmd.doctor(repo)}`);

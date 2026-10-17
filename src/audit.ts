@@ -122,11 +122,10 @@ export function hoursSinceAudit(db: Db, repo: string): number {
   return t ? (Date.now() - new Date(t).getTime()) / 3_600_000 : Infinity;
 }
 
-/** Labels the auditor proposed, restricted to what the repo actually has, plus the repo's defaults. */
+/** Labels the auditor proposed, restricted to what the repo actually has; never process labels like `agent: …`. */
 export async function labelsFor(rc: RepoConfig, proposed: string[]): Promise<string[]> {
   const existing = new Set(await repoLabels(rc.full_name));
-  const wanted = [...new Set([...proposed, ...rc.issue_labels_default])];
-  return wanted.filter((l) => existing.has(l));
+  return [...new Set(proposed)].filter((l) => existing.has(l) && !/^agent\b/i.test(l));
 }
 
 let labelCache = new Map<string, string[]>();

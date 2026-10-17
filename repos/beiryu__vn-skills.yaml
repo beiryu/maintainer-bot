@@ -1,7 +1,9 @@
 full_name: beiryu/vn-skills
 default_branch: main
-branch_prefix: "agent/"
-branch_name: "{{number}}-{{slug}}"
+branch_prefix: ""
+branch_name: "{{type}}/{{number}}-{{slug}}"
+# Work = open issues assigned to github_user (approve p<n>, approve d<n> --take, `take <n>`, or assigning on GitHub).
+pick: assigned
 # Reserved for human contributors per CONTRIBUTING.md, or waiting on a decision.
 skip_labels: ["status: blocked", "help wanted", "good first issue"]
 # One test FILE per run: vitest test names contain spaces, which the bot's test vars reject.
@@ -25,18 +27,12 @@ forbidden_paths:
 roadmap_file: ROADMAP.md
 pr_types: [feat, fix, data, docs, test, refactor, perf, build, ci, chore, revert]
 pr_scopes: [vietqr, vn-address, vn-tax-id, vn-money-words, vn-lunar, vn-einvoice, core, cli, mcp, skill, data, deps, repo, release]
-issue_labels_default: ["agent: ready"]
-labels_lifecycle:
-  ready: "agent: ready"
-  working: "agent: working"
-  pr_open: "agent: pr-open"
-  needs_human: "agent: needs-human"
 audit_files: [README.md, CONTRIBUTING.md, AGENTS.md, vn-skills-SPEC.md, packages/core/data/SOURCES.md]
 sources:
   - { name: provinces, kind: github, repo: thanglequoc/vietnamese-provinces-database, pinned_from: scripts/build-data.ts, paths: [json/] }
   - { name: adminunits, kind: github, repo: tranngocminhhieu/vietnamadminunits, pinned_from: scripts/build-data.ts, paths: [vietnamadminunits/data/] }
   - { name: banks, kind: github, repo: xuannghia/vietnam-qr-pay, pinned_from: scripts/build-data.ts, paths: [src/] }
-agent_disclosure: "GitHub Copilot CLI via maintainer-bot"
+agent_disclosure: ""   # AI use is stated once in CONTRIBUTING.md
 notes: |
   Core is offline: no fetch/HTTP in packages/core; only scripts/build-data.ts downloads.
   Never hand-edit packages/core/data/*.json; data changes go through scripts/build-data.ts + SOURCES.md with pinned SHAs.
@@ -46,4 +42,4 @@ notes: |
   For a FEATURE issue the test written first is the acceptance test: it fails on the base because the export/command/tool does not exist yet. That is the expected failure.
   Conventional Commits; the PR title is squash-merged and must be "type(scope): subject" with a scope from the repo's PR lint (see pr_scopes). PR body: "Closes #N" and the RM-NNN id when the issue has one.
   Run `pnpm format` before finishing; CI runs format:check. Code, issues and PRs in English; user docs also in Vietnamese (README.vi.md) when README.md changes.
-  ROADMAP.md `status:` lines can be stale: the open-issue list is the truth about what is filed. The bot marks `done (#PR)` itself when it opens a PR for an RM item.
+  ROADMAP.md `status:` lines can be stale: the open-issue list is the truth about what is filed. A PR for an RM item also sets its status to `done (#PR)`.

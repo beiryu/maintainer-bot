@@ -92,7 +92,9 @@ Rules that are stricter than usual because the implementer is a machine:
 - Prefer few proposals you are sure about over many you are not. One finding per proposal.
 - A proposal must say: what is wrong or missing (with file paths), what "done" looks like
   (an acceptance checklist the implementer can tick), and which labels from the repo's
-  label set apply.
+  label set apply (type/area/priority/size; never process labels such as `agent: …`).
+- Write the issue as the maintainer would write it for their own project: plain and direct,
+  no mention of bots, audits, automation or AI, and no "suggested PR title" line.
 - If an open issue or a roadmap item already covers a finding, still list it but fill
   covers_issue / covers_rm so the maintainer sees it is not new.
 

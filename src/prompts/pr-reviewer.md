@@ -44,10 +44,10 @@ recommendation:
 
 reply: the review comment the maintainer will post, addressed to @{{author}}, in the language
 the PR is written in. Specific and kind: say what is good in one line, then the findings as a
-short list with file:line. If the gate failed, say which step and quote the key line. No AI
-disclosure line; the maintainer edits and sends it.
+short list with file:line. If the gate failed, say which step and quote the key line. Write as
+the maintainer: no mention of bots, automation or AI. The maintainer edits and sends it.
 
-labels_add: type/area labels that fit, from: {{labels}}
+labels_add: type/area labels that fit (never `agent: …`), from: {{labels}}
 
 End your answer with exactly one JSON block:
 ```json
