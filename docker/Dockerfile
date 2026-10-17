@@ -30,9 +30,8 @@ ENV HOME=/home/bot PATH=/home/bot/.local/bin:/home/bot/go/bin:$PATH \
     GOMODCACHE=/home/bot/.cache-vol/go/mod GOCACHE=/home/bot/.cache-vol/go/build \
     UV_CACHE_DIR=/home/bot/.cache-vol/uv/cache UV_PYTHON_INSTALL_DIR=/home/bot/.cache-vol/uv/python \
     UV_LINK_MODE=copy \
-    PNPM_HOME=/home/bot/.cache-vol/pnpm npm_config_store_dir=/home/bot/.cache-vol/pnpm/store \
-    npm_config_cache=/home/bot/.cache-vol/npm COREPACK_HOME=/home/bot/.cache-vol/corepack \
-    SKIP_INSTALL_SIMPLE_GIT_HOOKS=1
+    PNPM_HOME=/home/bot/.cache-vol/pnpm npm_config_cache=/home/bot/.cache-vol/npm \
+    COREPACK_HOME=/home/bot/.cache-vol/corepack SKIP_INSTALL_SIMPLE_GIT_HOOKS=1
 
 # Claude Code stays available as an alternative runtime (sandbox.runtime: claude).
 RUN curl -fsSL https://claude.ai/install.sh | bash \
@@ -43,5 +42,11 @@ RUN git config --global user.name "maintainer-bot" \
  && git config --global user.email "maintainer-bot@localhost" \
  && git config --global --add safe.directory '*' \
  && mkdir -p /home/bot/.cache-vol
+
+# pnpm 12 ignores npm_config_store_dir; its own global config puts the store on the cache
+# volume, so packages survive between issues instead of being fetched into every clone.
+RUN pnpm config set store-dir /home/bot/.cache-vol/pnpm/store --global \
+ && pnpm config set cache-dir /home/bot/.cache-vol/pnpm/cache --global \
+ && pnpm config set state-dir /home/bot/.cache-vol/pnpm/state --global
 
 WORKDIR /work
