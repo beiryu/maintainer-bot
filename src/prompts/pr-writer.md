@@ -21,6 +21,7 @@ Rules:
   does not ask for.
 - Title: imperative, under 72 characters, in the style of recent commit titles in `git log`.
   {{pr_rules}}
+  {{feedback}}
 - Body starts with "Closes #{{number}}". If the issue title carries a roadmap id like
   [RM-012], mention that id in the body too.
 - If the issue has an acceptance checklist, repeat it with each item ticked or, when not

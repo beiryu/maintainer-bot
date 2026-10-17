@@ -510,12 +510,21 @@ export function checkPrTitle(title: string, rc: RepoConfig): string | null {
 }
 
 async function writePr(ctx: Ctx, rc: RepoConfig, issue: Issue) {
-  const r = await runAgent(ctx, {
-    agent: 'pr-writer', issueId: issue.id, workdir: await reviewDir(issue), readOnly: true,
-    vars: { ...issueVars(rc, issue), summary: issue.summary ?? '', pr_rules: prRules(rc) },
-  });
-  const bad = checkPrTitle(r.title, rc);
-  if (bad) throw new Error(`PR title "${r.title}" fails the repo's lint: ${bad}`);
+  const dir = await reviewDir(issue);
+  let r!: { title: string; body: string };
+  let lint = '';
+  // A title the repo's PR lint would reject is a wording slip, not a reason to drop reviewed work: ask once more.
+  for (let round = 0; round < 2; round++) {
+    r = await runAgent(ctx, {
+      agent: 'pr-writer', issueId: issue.id, workdir: dir, readOnly: true,
+      vars: { ...issueVars(rc, issue), summary: issue.summary ?? '', pr_rules: prRules(rc), feedback: lint },
+    });
+    const bad = checkPrTitle(r.title, rc);
+    if (!bad) break;
+    if (round === 1) throw new Error(`PR title "${r.title}" fails the repo's lint: ${bad}`);
+    lint = `Your previous title "${r.title}" fails the repository's PR lint: ${bad}. Pick a type and scope from the allowed lists `
+      + '(a new skill or package area without its own scope goes under the closest listed one, e.g. "skill").';
+  }
   // The disclosure comes from what the runtime reported, never from an agent's own claim.
   const models = ctx.db.modelsForIssue(issue.id);
   const tool = models ? `${rc.agent_disclosure} (model${models.length > 1 ? 's' : ''}: ${models.join(', ')})` : rc.agent_disclosure;
@@ -528,7 +537,7 @@ async function writePr(ctx: Ctx, rc: RepoConfig, issue: Issue) {
 function prRules(rc: RepoConfig): string {
   const rules: string[] = [];
   if (rc.pr_types.length) rules.push(`The title must be a Conventional Commit "type(scope): subject" with type one of: ${rc.pr_types.join(', ')}.`);
-  if (rc.pr_scopes.length) rules.push(`Allowed scopes: ${rc.pr_scopes.join(', ')}.`);
+  if (rc.pr_scopes.length) rules.push(`Allowed scopes (no others; a new area without its own scope uses the closest one, e.g. "skill"): ${rc.pr_scopes.join(', ')}.`);
   return rules.join('\n');
 }
 
