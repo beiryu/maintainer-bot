@@ -16,9 +16,10 @@ import { runInSandbox, tail } from './sandbox.js';
 
 const untrusted = (s: string) => s.replace(/<\/?untrusted/gi, '&lt;untrusted').slice(0, 20_000);
 
-/** Someone else's: not the maintainer, and not the maintainer's own automation. */
+/** Someone else's: not the maintainer, and not automation (GitHub Apps, bots, the repo's own workflows). */
 export function isOutsider(author: string | undefined, me: string): boolean {
-  return !!author && author.toLowerCase() !== me.toLowerCase();
+  if (!author || author.toLowerCase() === me.toLowerCase()) return false;
+  return !author.startsWith('app/') && !author.endsWith('[bot]') && !gh.isBot(author);
 }
 
 async function ciLine(repo: string, n: number): Promise<string> {

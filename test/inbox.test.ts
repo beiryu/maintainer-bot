@@ -73,6 +73,8 @@ describe('outside contributions', () => {
     expect(isOutsider('someone', 'beiryu')).toBe(true);
     expect(isOutsider('Beiryu', 'beiryu')).toBe(false);
     expect(isOutsider(undefined, 'beiryu')).toBe(false);
+    expect(isOutsider('app/github-actions', 'beiryu')).toBe(false);
+    expect(isOutsider('dependabot[bot]', 'beiryu')).toBe(false);
   });
   it('keeps one pending draft per issue or PR until it is sent or dropped', () => {
     const db = new Db(':memory:');
