@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!-- Every 2 hours, one hour after oss-bot (both share a run lock): follow up open PRs, audit when due, advance one issue, open PRs, notify what needs you.
+     Install:  cp launchd/dev.khanh.maintainerbot.plist ~/Library/LaunchAgents/ && launchctl load ~/Library/LaunchAgents/dev.khanh.maintainerbot.plist
+     Run once now:  launchctl kickstart gui/$(id -u)/dev.khanh.maintainerbot
+     Stop:  launchctl unload ~/Library/LaunchAgents/dev.khanh.maintainerbot.plist
+     bin/maintainer-bot-run.sh sets PATH, sources .env and skips the pass when Colima is not running. -->
+<plist version="1.0"><dict>
+  <key>Label</key><string>dev.khanh.maintainerbot</string>
+  <key>WorkingDirectory</key><string>/Users/khanh.dinhn/Development/open-source/maintainer-bot</string>
+  <key>ProgramArguments</key>
+  <array><string>/Users/khanh.dinhn/Development/open-source/maintainer-bot/bin/maintainer-bot-run.sh</string></array>
+  <key>StartInterval</key><integer>7200</integer>
+  <key>RunAtLoad</key><false/>
+  <!-- StartInterval counts from load; load this one an hour after oss-bot so the two do not collide. -->
+  <key>StandardOutPath</key><string>/Users/khanh.dinhn/Development/open-source/maintainer-bot/data/launchd.log</string>
+  <key>StandardErrorPath</key><string>/Users/khanh.dinhn/Development/open-source/maintainer-bot/data/launchd.log</string>
+</dict></plist>

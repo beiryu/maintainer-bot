@@ -1,0 +1,34 @@
+# Personal account the bot acts as (issues, pushes, PRs on your own repos); its gh keyring token is used even when another gh account is active.
+# The Copilot token (COPILOT_GITHUB_TOKEN) comes from the company account instead.
+github_user: YOUR_PERSONAL_USER
+# Repos live one per file in repos/<owner>__<name>.yaml (see `maintainer-bot repo add`).
+# SSH key registered on github_user as a *signing* key; every bot commit is signed (Verified).
+commit_signing_key: ~/.ssh/YOUR_signing_key
+repos: []
+
+limits:
+  max_in_flight_per_repo: 1
+  max_triage_per_run: 5
+  audit_interval_hours: 24      # `maintainer-bot audit` ignores this
+  max_attempts: 3
+  max_go_build_cache_gb: 6
+
+budget:                 # USD; Copilot AI credits are converted at 1 credit = $0.01
+  max_cost_per_call_usd: 3      # -> --max-ai-credits 300 per agent call (minimum 30)
+
+sandbox:
+  image: maintainer-bot-sandbox
+  memory: 5g          # the Docker VM currently has ~6 GB
+  cpus: "4"
+  runtime: copilot      # or: claude
+  auth_env: COPILOT_GITHUB_TOKEN   # fine-grained PAT, "Copilot Requests" permission only
+  cache_volume: maintainer-bot-cache    # pnpm store, Go and uv caches
+  agent_timeout_min: 30
+  gate_timeout_min: 60
+
+# Shared with oss-bot on this machine: the Docker VM fits one sandbox at a time.
+# lock_file: ~/.oss-bot-run.lock
+
+notify:
+  # telegram_chat_id: "123456"            # plus TELEGRAM_BOT_TOKEN in the environment
+  # slack_webhook_env: SLACK_WEBHOOK_URL
