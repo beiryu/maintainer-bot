@@ -87,6 +87,17 @@ export async function runOnce(ctx: Ctx, opts: RunOpts) {
     }
   }
 
+  // Issues the bot stopped on that were closed some other way (fixed by hand, dropped) leave the inbox.
+  for (const i of opts.triageOnly || audit === 'only' ? [] : db.issuesInState('skipped')) {
+    if (!active(i.repo) || !db.get(`handed-back:${i.id}`)) continue;
+    try {
+      if ((await gh.getIssue(i.repo, i.number)).state !== 'OPEN') {
+        db.transition(i.id, 'closed');
+        events.push(`${i.url} closed on GitHub; dropped from the inbox`);
+      }
+    } catch { /* checked again next run */ }
+  }
+
   // 2. Other people's new issues and PRs: draft a triage reply / review for the inbox.
   if (!opts.triageOnly && !opts.issue && audit !== 'only' && !opts.dry) {
     for (const rc of cfg.repos) {
