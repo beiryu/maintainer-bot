@@ -45,8 +45,21 @@ export async function probeRepo(ctx: Ctx, rc: RepoConfig, log: (m: string) => vo
     const r = await runInSandbox(ctx.cfg, dir, cmd);
     return { cmd, ok: r.exitCode === 0, secs: Math.round((Date.now() - t) / 1000), timedOut: r.timedOut, excerpt: tail(r.output, 8) };
   };
-  const steps: StepResult[] = [];
+  let steps: StepResult[] = [];
   for (const cmd of rc.gate) steps.push(await run(cmd));
+  // The sample tree is a few commits old: a step the repo added since (a new script) fails there
+  // but not on the branch the bot works on. Judge the gate on the tip itself before blaming it.
+  if (steps.some((s) => !s.ok) && sampleLine.startsWith('the last')) {
+    // Back to the tip: tracked files reset, files only the sample had removed, build output (ignored) kept.
+    await git(dir, ['reset', '-q', '--hard', 'HEAD']);
+    await git(dir, ['clean', '-qfd']);
+    const onTip: StepResult[] = [];
+    for (const cmd of rc.gate) onTip.push(await run(cmd));
+    if (onTip.filter((s) => !s.ok).length < steps.filter((s) => !s.ok).length) {
+      steps = onTip;
+      sampleLine = 'the tip itself (the sample tree predates a gate step; diff-scoped steps run on nothing)';
+    }
+  }
   const probe = focusedProbe(rc);
   const focused = probe ? await run(probe) : null;
   return { sha, dir, steps, focused, sampleLine };
