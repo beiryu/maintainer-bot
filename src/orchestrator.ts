@@ -451,6 +451,10 @@ async function code(ctx: Ctx, rc: RepoConfig, issue: Issue) {
     },
   });
   // Giving up is a judgement about the issue, not a slip: another paid attempt would read the same.
+  // A wrong regression test is the reproducer's to fix, not a reason to drop the issue.
+  if (!r.done && r.testWrong && JSON.parse(issue.test_files ?? '[]').length) {
+    return retry(ctx, issue, `The coder found the regression test wrong (rewrite it):\n${r.summary}`, 'claimed');
+  }
   if (!r.done) return db.skip(issue.id, `coder gave up: ${r.summary}`);
   db.transition(issue.id, 'coded', { summary: r.summary });
 }

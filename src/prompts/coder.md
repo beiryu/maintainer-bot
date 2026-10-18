@@ -24,6 +24,10 @@ Rules:
   without picking one, or needs a fact the repository does not contain: a number, a name, a
   legal rule), stop and say so (done=false): guessing would put wrong facts into the repo,
   and another attempt would read the same.
+- If the regression test written for you is itself wrong (it contradicts the issue, the
+  project's rules or another test, so no correct change can pass it), stop with done=false
+  and testWrong=true, and say in the summary what is wrong with it: it is rewritten and you
+  get another attempt.
 - For a new capability, do the whole thing the project's rules ask for (e.g. library
   function + CLI command + MCP tool + docs + tests), not just the part the test touches.
 - Keep the change as small as the fix allows; no unrelated cleanups.
@@ -33,5 +37,5 @@ Rules:
 
 End your answer with exactly one JSON block:
 ```json
-{"done": true, "summary": "what the issue needed and what the change does", "filesChanged": ["path"]}
+{"done": true, "testWrong": false, "summary": "what the issue needed and what the change does", "filesChanged": ["path"]}
 ```

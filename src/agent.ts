@@ -35,7 +35,7 @@ export const AGENTS = {
   },
   coder: {
     access: WRITE, maxTurns: 60,
-    schema: z.object({ done: z.boolean(), summary: z.string(), filesChanged: z.array(z.string()) }),
+    schema: z.object({ done: z.boolean(), summary: z.string(), filesChanged: z.array(z.string()), testWrong: z.boolean().optional() }),
   },
   reviewer: {
     access: READ, maxTurns: 20,
