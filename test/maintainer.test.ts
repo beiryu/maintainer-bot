@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { layoutSummary, testCounts } from '../src/audit.js';
-import { branchFor, checkPrTitle, pickReason } from '../src/orchestrator.js';
+import { branchFor, checkPrTitle, pickReason, withMaintainerComments } from '../src/orchestrator.js';
 import { markDone, parseRoadmap, rmIdFromTitle, roadmapSummary } from '../src/roadmap.js';
 import { lineDiff, pinnedSha } from '../src/watch.js';
 import { mkdtempSync, writeFileSync, mkdirSync } from 'node:fs';
@@ -140,5 +140,15 @@ describe('branchFor', () => {
       .toBe('feat/17-mcp-expose-lunar-tet-canchi-as-mcp-tools');
     expect(branchFor(rc, 'fix: off by one', 9, '[RM-013] vn-number: format')).toBe('fix/9-vn-number-format');
     expect(branchFor(rc, 'Update docs', 3, 'Docs')).toBe('change/3-docs');
+  });
+});
+
+describe('withMaintainerComments', () => {
+  it('appends the maintainer\'s comments to the body, oldest first', () => {
+    expect(withMaintainerComments('Goal.\n', [])).toBe('Goal.\n');
+    expect(withMaintainerComments('Goal.\n', [
+      { body: 'Source: Circular 59/2021.', createdAt: '2026-10-18T01:00:00Z' },
+      { body: 'Also X.', createdAt: '2026-10-19T01:00:00Z' },
+    ])).toBe('Goal.\n\n--- maintainer comment (2026-10-18):\nSource: Circular 59/2021.\n\n--- maintainer comment (2026-10-19):\nAlso X.');
   });
 });

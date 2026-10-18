@@ -268,9 +268,19 @@ async function triage(ctx: Ctx, rc: RepoConfig, issue: Issue): Promise<Issue> {
   }
 }
 
+/** The issue body followed by the maintainer's comments, oldest first. */
+export function withMaintainerComments(body: string, comments: { body: string; createdAt: string }[]): string {
+  if (!comments.length) return body;
+  return `${body.trimEnd()}\n\n${comments.map((c) => `--- maintainer comment (${c.createdAt.slice(0, 10)}):\n${c.body.trim()}`).join('\n\n')}`;
+}
+
 /** Takes the repo's pipeline slot. Nothing changes on GitHub: the issue is already assigned. */
 async function promote(ctx: Ctx, rc: RepoConfig, issue: Issue): Promise<string | null> {
-  void rc;
+  // The body as it is now, plus what the maintainer added in comments (sources, decisions).
+  const gi = await gh.getIssue(rc.full_name, issue.number);
+  const notes = (await gh.issueComments(rc.full_name, issue.number))
+    .filter((c) => c.author.toLowerCase() === ctx.cfg.github_user.toLowerCase());
+  ctx.db.update(issue.id, { body: withMaintainerComments(gi.body ?? '', notes) });
   ctx.db.transition(issue.id, 'claimed');
   // What happens to it next (PR opened, skipped) is reported on its own; this alone is noise.
   log(`#${issue.number}: picked`);
