@@ -42,4 +42,4 @@ notes: |
   For a FEATURE issue the test written first is the acceptance test: it fails on the base because the export/command/tool does not exist yet. That is the expected failure.
   Conventional Commits; the PR title is squash-merged and must be "type(scope): subject" with a scope from the repo's PR lint (see pr_scopes). PR body: "Closes #N" and the RM-NNN id when the issue has one.
   Run `pnpm format` before finishing; CI runs format:check. Code, issues and PRs in English; user docs also in Vietnamese (README.vi.md) when README.md changes.
-  ROADMAP.md `status:` lines can be stale: the open-issue list is the truth about what is filed. A PR for an RM item also sets its status to `done (#PR)`.
+  ROADMAP.md `status:` lines can be stale: the open-issue list is the truth about what is filed. Do not edit ROADMAP.md: the `done (#PR)` line is added when the PR is opened. End every new file with a newline.
