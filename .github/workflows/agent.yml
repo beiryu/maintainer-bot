@@ -27,7 +27,9 @@ on:
         required: true
       BOT_PAT:
         description: fine-grained PAT of the maintainer, this repo only (contents, issues, pull requests read/write)
-        required: true
+        # Not `required`: it lives in the caller's environment "bot", which the caller's job cannot
+        # see; the publish job below enters that environment and gets it. A missing token fails there.
+        required: false
 
 env:
   BOT: ${{ github.workspace }}/.bot
@@ -141,6 +143,7 @@ jobs:
           cd "$BOT" && npm run -s maintainer-bot -- --state "$STATE" ci state-pull --repo "$GITHUB_REPOSITORY" --bot-config repo-config.yml
       - name: Publish
         run: |
+          if [ -z "$GH_TOKEN" ]; then echo "::error::BOT_PAT is empty: add it as a secret of the environment \"bot\" in this repository"; exit 1; fi
           cd "$BOT" && npm run -s maintainer-bot -- --state "$STATE" ci publish --repo "$GITHUB_REPOSITORY" --bot-config repo-config.yml \
             --event "$GITHUB_EVENT_PATH" --event-name "$GITHUB_EVENT_NAME" \
             --run-url "$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID" \

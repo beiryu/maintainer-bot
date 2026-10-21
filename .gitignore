@@ -4,3 +4,6 @@ data/
 work/
 config.yaml
 .env
+.env*
+*.swp
+*.swo
