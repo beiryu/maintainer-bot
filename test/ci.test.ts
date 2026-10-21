@@ -67,9 +67,9 @@ describe('stopComment', () => {
   it('states the reason plainly and how to resume, with nothing that says bot', async () => {
     const { stopComment } = await import('../src/ci.js');
     const c = stopComment('coder gave up: Blocked: vn-pit needs a legal source that is not in the repo', 69, '#59');
-    expect(c).toBe('Pausing this one: vn-pit needs a legal source that is not in the repo.');
-    expect(c).not.toMatch(/bot|🤖/i);
+    expect(c).toBe('<!-- maintainer-bot:stop -->\nPausing this one: vn-pit needs a legal source that is not in the repo.');
+    expect(c.replace(/<!--[^]*?-->/g, '')).not.toMatch(/bot|🤖/i); // hidden marker aside, nothing visible says bot
     expect(stopComment('error: rates belong in data/, which the bot cannot edit. The maintainer must supply a source first.', 69, ''))
-      .toBe("Pausing this one: rates belong in data/, which I can't edit. Need to supply a source first.");
+      .toBe("<!-- maintainer-bot:stop -->\nPausing this one: rates belong in data/, which I can't edit. Need to supply a source first.");
   });
 });

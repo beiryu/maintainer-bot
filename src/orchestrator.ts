@@ -286,8 +286,13 @@ async function triage(ctx: Ctx, rc: RepoConfig, issue: Issue): Promise<Issue> {
   }
 }
 
+/** Comments the runs post under the maintainer's name (stop notes); they are not the maintainer's word. */
+export const STOP_MARK = '<!-- maintainer-bot:stop -->';
+export const isOwnNote = (body: string) => body.includes(STOP_MARK) || /^\s*Pausing this one:/.test(body);
+
 /** The issue body followed by the maintainer's comments, oldest first. */
 export function withMaintainerComments(body: string, comments: { body: string; createdAt: string }[]): string {
+  comments = comments.filter((c) => !isOwnNote(c.body));
   if (!comments.length) return body;
   return `${body.trimEnd()}\n\n${comments.map((c) => `--- maintainer comment (${c.createdAt.slice(0, 10)}):\n${c.body.trim()}`).join('\n\n')}`;
 }

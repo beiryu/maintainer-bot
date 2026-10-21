@@ -6,7 +6,7 @@ import { type Command, DASHBOARD_MARK, dashboardChanged, dashboardTitle, itemCom
 import type { Db, StateJson } from './db.js';
 import { ensureMirror } from './git.js';
 import * as gh from './github.js';
-import { approveFollowup, approveProposal, type Ctx, openPr, rejectProposal, replyText, runOnce } from './orchestrator.js';
+import { approveFollowup, approveProposal, type Ctx, openPr, rejectProposal, replyText, runOnce, STOP_MARK, withMaintainerComments } from './orchestrator.js';
 import { approveDraft } from './outside.js';
 
 // The bot on GitHub Actions. One workflow run = one pass, in two jobs:
@@ -168,7 +168,11 @@ async function applyCommand(ctx: Ctx, repo: string, c: Command): Promise<string>
   }
   const issue = db.issueByNumber(repo, c.number);
   if (issue) {
-    db.update(issue.id, { state: 'discovered', skip_reason: null, attempts: 0, feedback: null, blocked: null });
+    // Start from the issue as it reads now, with the maintainer's comments but not the stop notes.
+    const gi = await gh.getIssue(repo, c.number);
+    const notes = (await gh.issueComments(repo, c.number)).filter((x) => x.author.toLowerCase() === cfg.github_user.toLowerCase());
+    db.update(issue.id, { state: 'discovered', skip_reason: null, attempts: 0, feedback: null, blocked: null,
+      triage_reason: null, body: withMaintainerComments(gi.body ?? '', notes) });
     db.set(`handed-back:${issue.id}`, null);
   }
   if (c.cmd === 'take') await gh.assign(repo, c.number, cfg.github_user);
@@ -197,7 +201,7 @@ export function stopComment(reason: string, number: number, dashboard: string): 
     .replace(/\bI cannot\b/g, "I can't")
     .replace(/\s+/g, ' ').trim().slice(0, 500);
   void number; void dashboard;
-  return `Pausing this one: ${why}${/[.!?]$/.test(why) ? '' : '.'}`;
+  return `${STOP_MARK}\nPausing this one: ${why}${/[.!?]$/.test(why) ? '' : '.'}`;
 }
 
 const label = (c: Command) => c.cmd === 'approve' || c.cmd === 'reject' ? `${c.cmd} ${c.id}${'flag' in c && c.flag ? ` --${c.flag}` : ''}` : `${c.cmd} #${c.number}`;

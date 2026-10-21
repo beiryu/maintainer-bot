@@ -144,6 +144,12 @@ describe('branchFor', () => {
 });
 
 describe('withMaintainerComments', () => {
+  it('leaves out the stop notes posted under the maintainer\'s name', () => {
+    expect(withMaintainerComments('Goal.', [
+      { body: 'Pausing this one: the gate forbids lockfile changes.', createdAt: '2026-10-21T09:52:00Z' },
+      { body: '<!-- maintainer-bot:stop -->\nPausing this one: x.', createdAt: '2026-10-21T10:00:00Z' },
+    ])).toBe('Goal.');
+  });
   it('appends the maintainer\'s comments to the body, oldest first', () => {
     expect(withMaintainerComments('Goal.\n', [])).toBe('Goal.\n');
     expect(withMaintainerComments('Goal.\n', [
