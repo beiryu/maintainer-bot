@@ -21,7 +21,7 @@ repos and asks before every post; maintainer-bot works on yours, so the only app
 sources ─(watch)─▶ upstream digest ─┐
 repo mirror ─(auditor)──────────────┴▶ proposal p<n> ─(/approve p<n>)─▶ GitHub issue, assigned to you
 open issue assigned to you ─▶ claimed ─▶ reproduced ─▶ coded ─▶ gated ─▶ reviewed ─▶ pr_open ─(you merge)─▶ done
-                           when it gives up: "bot dừng lại" on the dashboard; nothing is posted on GitHub
+                           when it gives up: a short comment on the issue says why, and it is listed on the dashboard
 open PR: CI failed / review comments / behind base ─(followup agent)─▶ drafted fix, reply or rebase ─(/approve a<n>)─▶ pushed
 someone else's issue ─(maintainer-triage)─▶ draft d<n>: labels + reply ─(/approve d<n> [--take])─▶ posted [+ assigned to you → pipeline]
 someone else's PR ─(pr-reviewer, from the diff and its CI)─▶ draft d<n>: review ─(/approve d<n> [--changes])─▶ posted

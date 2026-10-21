@@ -174,6 +174,16 @@ export function shortError(e: unknown): string {
   return msg.split('\n')[0].slice(0, 200);
 }
 
+/** What the maintainer would write on an issue they had to put down: the reason, and how to resume. */
+export function stopComment(reason: string, number: number, dashboard: number): string {
+  const why = reason
+    .replace(/^(coder gave up|error|triage: not feasible|Reviewer: no rework can fix this):\s*/i, '')
+    .replace(/^Blocked:\s*/i, '')
+    .replace(/\s+/g, ' ').trim().slice(0, 500);
+  return `Pausing this one: ${why}${/[.!?]$/.test(why) ? '' : '.'}\n\n`
+    + `Once that's in place, \`/retry #${number}\`${dashboard ? ` on #${dashboard}` : ''} picks it up again.`;
+}
+
 const label = (c: Command) => c.cmd === 'approve' || c.cmd === 'reject' ? `${c.cmd} ${c.id}${'flag' in c && c.flag ? ` --${c.flag}` : ''}` : `${c.cmd} #${c.number}`;
 
 export async function ciPublish(ctx: Ctx, opts: PublishOpts): Promise<string[]> {
@@ -209,7 +219,7 @@ export async function ciPublish(ctx: Ctx, opts: PublishOpts): Promise<string[]> 
       if (pause) { db.set('paused', '1'); results.push('⏸ paused: no agent runs until `/resume`'); }
       if (resume) { db.set('paused', null); results.push('▶️ resumed'); }
       for (const r of results) log(r);
-      const reply = `${REPLY_MARK}\n🤖 ${results.join('\n🤖 ')}${opts.runUrl ? ` · [log](${opts.runUrl})` : ''}`;
+      const reply = `${REPLY_MARK}\n${results.join('\n')}${opts.runUrl ? ` · [log](${opts.runUrl})` : ''}`;
       await gh.commentOnIssue(repo, dash.number, reply).catch((e) => log(`reply failed: ${(e as Error).message}`));
     }
     const newest = comments.at(-1)?.id ?? 0;
@@ -229,7 +239,16 @@ export async function ciPublish(ctx: Ctx, opts: PublishOpts): Promise<string[]> 
     }
   }
 
-  // 3. The dashboard.
+  // 3. An issue the bot stopped on gets one comment saying why, in the maintainer's voice.
+  for (const i of db.issuesInState('skipped').filter((i) => i.repo === repo && db.get(`handed-back:${i.id}`) && !db.get(`stop-noted:${i.id}`))) {
+    if (i.skip_reason?.startsWith('rejected by human')) continue;
+    try {
+      await gh.commentOnIssue(repo, i.number, stopComment(i.skip_reason ?? '', i.number, Number(db.get(`dashboard:${repo}`) ?? 0)));
+      db.set(`stop-noted:${i.id}`, new Date().toISOString());
+    } catch (e) { log(`#${i.number}: stop note not posted: ${(e as Error).message.split('\n')[0]}`); }
+  }
+
+  // 4. The dashboard.
   if (db.get('budget-exhausted')) notes.push(`⏸ This month's budget ($${cfg.budget.max_cost_per_month_usd}) is spent; no agent runs until next month.`);
   const body = renderDashboard(db, cfg, {
     repo, runUrl: opts.runUrl, notes, monthCostUsd: db.costSince(monthStart()),

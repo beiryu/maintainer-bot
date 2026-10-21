@@ -55,3 +55,12 @@ describe('shortError', () => {
     expect(shortError(new Error('d3 is already done\nmore'))).toBe('d3 is already done');
   });
 });
+
+describe('stopComment', () => {
+  it('states the reason plainly and how to resume, with nothing that says bot', async () => {
+    const { stopComment } = await import('../src/ci.js');
+    const c = stopComment('coder gave up: Blocked: vn-pit needs a legal source that is not in the repo', 69, 59);
+    expect(c).toBe('Pausing this one: vn-pit needs a legal source that is not in the repo.\n\nOnce that\'s in place, `/retry #69` on #59 picks it up again.');
+    expect(c).not.toMatch(/bot|🤖/i);
+  });
+});
