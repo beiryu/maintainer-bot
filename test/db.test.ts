@@ -34,6 +34,36 @@ describe('Db', () => {
     expect([i.state, i.skip_reason]).toEqual(['skipped', 'nope']);
   });
 
+  it('round-trips through JSON, dropping only old agent calls', () => {
+    const db = setup();
+    const a = db.issueByNumber('o/r', 1)!;
+    db.transition(a.id, 'pr_open', { score: 0.7, branch: 'fix/1-x', test_files: '["t.ts"]' });
+    db.insertPr(a.id, 'https://github.com/o/r/pull/9', 9);
+    db.updatePr(a.id, { ci_state: 'failure' });
+    db.addAction(a.id, 'fix', 'msg', 'diff --git a/x b/x', 'f'.repeat(40));
+    const pid = db.addProposal({ repo: 'o/r', kind: 'gap', title: 'T', body: 'B', labels: '["x"]', rationale: '', evidence: '[]', covers_issue: null, covers_rm: null, run_id: null });
+    db.setSource({ repo: 'o/r', name: 's', pinned: 'a', upstream: 'b', digest: 'changed' });
+    db.set('paused', '1');
+    const call = { issueId: a.id, agent: 'coder', durationMs: 1, inputTokens: 1, outputTokens: 1, ok: true, resultJson: '{}', runId: 'r' };
+    db.recordCall({ ...call, startedAt: new Date().toISOString(), costUsd: 1 });
+    db.recordCall({ ...call, startedAt: '2020-01-01T00:00:00.000Z', costUsd: 9 });
+
+    const json = JSON.parse(JSON.stringify(db.exportJson()));
+    const back = new Db(':memory:');
+    back.importJson(json);
+    expect(back.issue(a.id)).toEqual(db.issue(a.id));
+    expect(back.prForIssue(a.id)).toEqual(db.prForIssue(a.id));
+    expect(back.pendingActions()).toEqual(db.pendingActions());
+    expect(back.proposal(pid)).toEqual(db.proposal(pid));
+    expect(back.sources('o/r')).toEqual(db.sources('o/r'));
+    expect(back.get('paused')).toBe('1');
+    expect(back.costForRun('r')).toBe(1);
+    expect(back.exportJson()).toEqual({ ...json, exported_at: expect.any(String) });
+    // A second import replaces, never appends.
+    back.importJson(json);
+    expect(back.allIssues().length).toBe(3);
+  });
+
   it('sums cost per run and window', () => {
     const db = setup();
     const call = { issueId: null, agent: 'triage', durationMs: 1, inputTokens: 1, outputTokens: 1, ok: true, resultJson: '{}' };

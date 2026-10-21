@@ -240,6 +240,16 @@ CREATE TABLE IF NOT EXISTS kv (key TEXT PRIMARY KEY, value TEXT);
 
 const now = () => new Date().toISOString();
 
+// Every table, for export/import; the schema above is the one source of column names.
+const TABLES = ['repos', 'issues', 'prs', 'pending_actions', 'agent_calls', 'proposals', 'sources', 'drafts', 'kv'] as const;
+
+/**
+ * The whole database as plain JSON: how state travels when there is no disk to keep it on
+ * (a runner job loads it at the start and saves it at the end). Agent calls older than
+ * `keepCallsDays` are dropped; they only feed the cost report.
+ */
+export interface StateJson { version: 1; exported_at: string; tables: Record<string, Record<string, unknown>[]> }
+
 export class Db {
   readonly sql: Database.Database;
 
@@ -258,6 +268,33 @@ export class Db {
     }
     const actionCols = (this.sql.prepare('PRAGMA table_info(pending_actions)').all() as { name: string }[]).map((c) => c.name);
     if (!actionCols.includes('base_sha')) this.sql.exec('ALTER TABLE pending_actions ADD COLUMN base_sha TEXT');
+  }
+
+  // --- export / import ---
+  exportJson(keepCallsDays = 90): StateJson {
+    const since = new Date(Date.now() - keepCallsDays * 86_400_000).toISOString();
+    const tables: StateJson['tables'] = {};
+    for (const t of TABLES) {
+      tables[t] = t === 'agent_calls'
+        ? this.sql.prepare('SELECT * FROM agent_calls WHERE started_at >= ? ORDER BY id').all(since) as Record<string, unknown>[]
+        : this.sql.prepare(`SELECT * FROM ${t}`).all() as Record<string, unknown>[];
+    }
+    return { version: 1, exported_at: now(), tables };
+  }
+  /** Replaces everything with the export; columns the export has and this schema lacks are ignored. */
+  importJson(state: StateJson) {
+    if (state.version !== 1) throw new Error(`unsupported state version ${state.version}`);
+    this.sql.transaction(() => {
+      for (const t of [...TABLES].reverse()) this.sql.prepare(`DELETE FROM ${t}`).run();
+      for (const t of TABLES) {
+        const cols = (this.sql.prepare(`PRAGMA table_info(${t})`).all() as { name: string }[]).map((c) => c.name);
+        for (const row of state.tables[t] ?? []) {
+          const keys = cols.filter((c) => c in row);
+          this.sql.prepare(`INSERT INTO ${t} (${keys.join(', ')}) VALUES (${keys.map((k) => `@${k}`).join(', ')})`)
+            .run(Object.fromEntries(keys.map((k) => [k, row[k]])));
+        }
+      }
+    })();
   }
 
   // --- repos ---

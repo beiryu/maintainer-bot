@@ -1,7 +1,7 @@
 The CI gate maintainer-bot runs for {{repo}} fails on the project's own unpatched default branch, so
 it cannot tell whether a change is good. Propose a gate that runs here.
 
-The repository is at /work (read-only). Gate commands run there in a Linux container with:
+The repository is at {{workdir}} (read-only). Gate commands run there in a Linux container with:
 Go, Node 22, Python via uv, git, make, gofmt. There is NO Docker, no databases, no
 Kubernetes, no cloud credentials, and only the module proxies are reachable. Anything that
 needs those cannot run here and must be left to the project's own CI.

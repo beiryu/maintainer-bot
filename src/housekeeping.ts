@@ -62,6 +62,8 @@ export async function housekeeping(cfg: Config, db: Db, log: (m: string) => void
   const done: string[] = [];
   const pruned = pruneFinishedClones(db);
   if (pruned) done.push(`removed ${pruned} checkout(s) of finished issues and doctor probes`);
+  // A runner is discarded after the job: no cache volume or VM disk to look after.
+  if (cfg.sandbox.mode !== 'docker') return done;
   try {
     const gb = (await cacheBytes(cfg)) / 2 ** 30;
     if (gb > cfg.limits.max_go_build_cache_gb) {

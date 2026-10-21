@@ -1,6 +1,6 @@
 You are triaging a GitHub issue in the maintainer's own repository to decide whether an
 automated implementer can resolve it well.
-The repository {{repo}} is checked out read-only at /work (branch {{default_branch}}).
+The repository {{repo}} is checked out read-only at {{workdir}} (branch {{default_branch}}).
 
 First read the project's contribution rules if they exist: AGENTS.md, .agents/*.md,
 CONTRIBUTING*.md. Then look at the code the issue is about.

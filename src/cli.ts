@@ -2,7 +2,7 @@
 import { Command } from 'commander';
 import { randomUUID } from 'node:crypto';
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
 import { runAudit } from './audit.js';
 import { loadConfig, repoConfig } from './config.js';
 import { doctor } from './doctor.js';
@@ -15,12 +15,27 @@ import { approveFollowup, approveProposal, editInEditor, openPr, rejectProposal,
 import { approveDraft } from './outside.js';
 import { sourceDigest } from './watch.js';
 
-const program = new Command('maintainer-bot').option('-c, --config <path>', 'config file', 'config.yaml');
+const program = new Command('maintainer-bot')
+  .option('-c, --config <path>', 'config file', 'config.yaml')
+  .option('--state <file>', 'keep state in this JSON file instead of data/state.db (loaded at start, saved at exit)');
+
+/** The state file's database: in memory, filled from the file if it exists, written back when the process ends. */
+function stateDb(file: string): Db {
+  const db = new Db(':memory:');
+  if (existsSync(file)) db.importJson(JSON.parse(readFileSync(file, 'utf8')));
+  // 'exit' fires after process.exit() too, so a run that failed still keeps what it got done.
+  process.on('exit', () => {
+    mkdirSync(dirname(file), { recursive: true });
+    writeFileSync(file, `${JSON.stringify(db.exportJson(), null, 1)}\n`);
+  });
+  return db;
+}
 
 function ctx(runId: string | null = null): Ctx {
   const cfg = loadConfig(program.opts().config);
   expectUser(cfg.github_user);
-  return { cfg, db: new Db(), runId };
+  const state = program.opts().state as string | undefined;
+  return { cfg, db: state ? stateDb(state) : new Db(), runId };
 }
 const days = (d: number) => new Date(Date.now() - d * 86_400_000).toISOString();
 const log = (m: string) => console.log(`${new Date().toISOString()} ${m}`);
@@ -239,6 +254,17 @@ repo.command('doctor <name>')
     const c = ctx();
     console.log(await doctor(c, repoConfig(c.cfg, name), { fix: !!o.fix, yes: !!o.yes, configPath: program.opts().config }));
   });
+const state = program.command('state').description('move state between data/state.db and a JSON file');
+state.command('export <file>').description('write data/state.db as JSON (what --state and the runner use)').action((file) => {
+  mkdirSync(dirname(file), { recursive: true });
+  writeFileSync(file, `${JSON.stringify(new Db().exportJson(), null, 1)}\n`);
+  console.log(`wrote ${file}`);
+});
+state.command('import <file>').description('replace data/state.db with the JSON file').action((file) => {
+  new Db().importJson(JSON.parse(readFileSync(file, 'utf8')));
+  console.log(`data/state.db now holds ${file}`);
+});
+
 program.command('cost').description('spend by agent over the last 7 and 30 days').action(() => {
   const { db } = ctx();
   for (const d of [7, 30]) {

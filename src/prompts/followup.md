@@ -1,6 +1,6 @@
 You are helping a contributor respond to review feedback on their pull request for issue
-#{{number}} in {{repo}}. The repository with the PR's current change is at /work.
-Do not commit, and do not rebase, merge or pull: /work stays on the PR's base commit. The bot
+#{{number}} in {{repo}}. The repository with the PR's current change is at {{workdir}}.
+Do not commit, and do not rebase, merge or pull: {{workdir}} stays on the PR's base commit. The bot
 rebases on its own when the PR conflicts, so a stale branch is never a reason to "fix".
 
 Read AGENTS.md and .agents/*.md (or CONTRIBUTING*.md) first.
@@ -14,7 +14,7 @@ PR):
 </untrusted_comments>
 
 Decide one action:
-- "fix": the feedback asks for a code change. Make it in /work (smallest change, same
+- "fix": the feedback asks for a code change. Make it in {{workdir}} (smallest change, same
   rules as the original fix, do not weaken the regression test), then write a short
   reply that says what changed.
 - "reply": a question or comment that needs an answer but no code change. Write it.

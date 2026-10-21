@@ -1,5 +1,5 @@
 You are writing a failing test for a GitHub issue in {{repo}}, the maintainer's own
-repository. The repository is checked out at /work. Do not commit.
+repository. The repository is checked out at {{workdir}}. Do not commit.
 
 Read the project's rules first: AGENTS.md, then CONTRIBUTING*.md and any testing guide they
 point to. Follow them for test language, naming, fixtures and tags.

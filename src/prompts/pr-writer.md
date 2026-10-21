@@ -1,6 +1,6 @@
 Write the pull request title and description for the change that resolves issue #{{number}}
 in {{repo}}, the maintainer's own repository. The repository with the change applied is at
-/work (read-only); the diff is in /work/.oss-bot/PATCH.diff.
+{{workdir}} (read-only); the diff is in {{workdir}}/.oss-bot/PATCH.diff.
 
 Look for the project's pull request template and follow its structure exactly: e.g.
 .agents/pull-request-description.md, or a pull_request_template.md / PULL_REQUEST_TEMPLATE.md

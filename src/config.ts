@@ -87,6 +87,11 @@ const Config = z.object({
     max_cost_per_call_usd: z.number().default(3),
   }),
   sandbox: z.object({
+    // docker: agents and gate commands run in a throwaway container on this machine.
+    // runner: they run directly in the current environment, which is itself throwaway (a
+    // GitHub Actions job). Nothing on the host is protected from the agent then, so the
+    // environment must hold no credential beyond the model's.
+    mode: z.enum(['docker', 'runner']).default('docker'),
     image: z.string().default('maintainer-bot-sandbox'),
     memory: z.string().default('5g'),
     cpus: z.string().default('4'),

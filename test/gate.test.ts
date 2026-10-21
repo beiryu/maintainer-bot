@@ -90,3 +90,14 @@ describe('repairPathVars', () => {
     expect(repairPathVars({ test: 'action' }, files)).toEqual({ test: 'action' });
   });
 });
+
+describe('sandbox modes', () => {
+  it('names the container mounts under docker and the real directories on a runner', async () => {
+    const { outPath, workPath } = await import('../src/sandbox.js');
+    const docker = { sandbox: { mode: 'docker' } } as Parameters<typeof workPath>[0];
+    const runner = { sandbox: { mode: 'runner' } } as Parameters<typeof workPath>[0];
+    expect([workPath(docker, 'work/x'), outPath(docker, 'data/o')]).toEqual(['/work', '/out']);
+    expect(workPath(runner, 'work/x')).toMatch(/^\/.*\/work\/x$/);
+    expect(outPath(runner, 'data/o')).toMatch(/^\/.*\/data\/o$/);
+  });
+});

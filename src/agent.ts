@@ -6,7 +6,7 @@ import { z } from 'zod';
 import type { Config } from './config.js';
 import type { Db } from './db.js';
 import { readAgentFile } from './git.js';
-import { execSandbox } from './sandbox.js';
+import { execSandbox, outPath, workPath } from './sandbox.js';
 
 // Test vars are pasted into the focused_test shell command, so only plain names and paths.
 export const safeTestVars = (vars: Record<string, string>) =>
@@ -264,7 +264,7 @@ function copilotTrace(outDir: string): RunTrace | null {
   return parseCopilotEvents(readAgentFile(outDir, join('copilot', 'session-state', session.name, 'events.jsonl')));
 }
 
-function copilotRun(cfg: Config, access: Access, prompt: string): RuntimeRun {
+function copilotRun(cfg: Config, access: Access, prompt: string, out: string): RuntimeRun {
   const tools = access === WRITE
     ? ['view', 'glob', 'grep', 'edit', 'create', 'apply_patch', 'bash', 'read_bash', 'write_bash', 'stop_bash', 'list_bash']
     : ['view', 'glob', 'grep'];
@@ -283,11 +283,11 @@ function copilotRun(cfg: Config, access: Access, prompt: string): RuntimeRun {
       // Strips the token from the agent's shell environment, not just from output.
       `--secret-env-vars=${cfg.sandbox.auth_env}`,
       `--max-ai-credits=${Math.max(30, Math.round(cfg.budget.max_cost_per_call_usd * 100))}`,
-      '--usage-output-file=/out/usage.json',
+      `--usage-output-file=${out}/usage.json`,
       ...(cfg.sandbox.model ? [`--model=${cfg.sandbox.model}`] : []),
     ],
-    // Copilot's state dir, session log included, lands in /out so it survives a killed run.
-    env: { COPILOT_HOME: '/out/copilot' },
+    // Copilot's state dir, session log included, lands in the out dir so it survives a killed run.
+    env: { COPILOT_HOME: `${out}/copilot` },
     trace: copilotTrace,
     parse(stdout, outDir) {
       let usage: ReturnType<typeof parseCopilotUsage> = { cost: null, inputTokens: null, outputTokens: null, models: [] };
@@ -309,13 +309,15 @@ export async function runAgent<A extends AgentName>(ctx: { cfg: Config; db: Db; 
   const token = process.env[cfg.sandbox.auth_env];
   if (!token) throw new AgentError(`${cfg.sandbox.auth_env} is not set`);
 
-  const prompt = fillTemplate(readFileSync(join(PROMPTS, `${opts.agent}.md`), 'utf8'), opts.vars);
-  const run = cfg.sandbox.runtime === 'copilot'
-    ? copilotRun(cfg, def.access, prompt)
-    : claudeRun(cfg, def.access, def.maxTurns, prompt);
   // Per-call scratch dir for runtime outputs (usage file), outside the repo checkout.
   const outDir = resolve('data', 'agent-out', randomUUID());
   mkdirSync(outDir, { recursive: true });
+  // {{workdir}} is where the agent finds the repo: the container mount, or the directory itself on a runner.
+  const vars = { ...opts.vars, workdir: workPath(cfg, opts.workdir) };
+  const prompt = fillTemplate(readFileSync(join(PROMPTS, `${opts.agent}.md`), 'utf8'), vars);
+  const run = cfg.sandbox.runtime === 'copilot'
+    ? copilotRun(cfg, def.access, prompt, outPath(cfg, outDir))
+    : claudeRun(cfg, def.access, def.maxTurns, prompt);
 
   const startedAt = new Date().toISOString();
   const started = Date.now();

@@ -18,7 +18,7 @@ import * as gh from './github.js';
 import { notify } from './notify.js';
 import { reviewOutsidePrs, triageOutsideIssues } from './outside.js';
 import { markDone, rmIdFromTitle } from './roadmap.js';
-import { runInSandbox, tail } from './sandbox.js';
+import { runInSandbox, tail, workPath } from './sandbox.js';
 import { sourceDigest } from './watch.js';
 
 export interface Ctx { cfg: Config; db: Db; runId: string | null }
@@ -56,6 +56,7 @@ export async function runOnce(ctx: Ctx, opts: RunOpts) {
     throw new Error(`${cfg.sandbox.auth_env} is not set; run \`source .env\` in this terminal first`);
   }
   // Docker's disk image grows on the host; running out corrupts every container's storage.
+  // (A runner's disk is checked the same way: a clone or build that runs out of space fails late.)
   mkdirSync('work', { recursive: true });
   const fs = statfsSync('work');
   const freeGb = (fs.bavail * fs.bsize) / 2 ** 30;
@@ -856,7 +857,7 @@ async function prepareRebase(ctx: Ctx, rc: RepoConfig, issue: Issue, pr: Pr, why
       vars: {
         ...issueVars(rc, issue),
         comments: `[system] The PR no longer applies on ${rc.default_branch}: ${String((e as Error).message).slice(0, 500)}\n`
-          + `The PR's current diff is in /work/.oss-bot/PATCH.diff. Re-apply that same change, including its test, onto the code now in /work. Choose "fix".`,
+          + `The PR's current diff is in ${workPath(cfg, agentWork)}/${AGENT_META}/PATCH.diff. Re-apply that same change, including its test, onto the code now in ${workPath(cfg, agentWork)}. Choose "fix".`,
       },
     });
     if (r.action !== 'fix') {
@@ -936,7 +937,7 @@ export async function afterCommit(cfg: Config, rc: RepoConfig, push: string, bas
     await execa('git', ['-c', 'core.hooksPath=/dev/null', 'clone', '-q', '--no-hardlinks', `file://${resolve(push)}`, gen]);
     mkdirSync(join(gen, AGENT_META), { recursive: true });
     appendFileSync(join(gen, '.git', 'info', 'exclude'), `\n/${AGENT_META}/\n`);
-    const r = await runInSandbox(cfg, gen, `git config --global --add safe.directory /work; ${rc.after_commit.join(' && ')} `
+    const r = await runInSandbox(cfg, gen, `git config --global --add safe.directory ${workPath(cfg, gen)}; ${rc.after_commit.join(' && ')} `
       + `&& git -c core.hooksPath=/dev/null add -A && git -c core.hooksPath=/dev/null diff --cached --binary HEAD > ${AGENT_META}/AFTER.diff`);
     if (r.exitCode !== 0) throw new Error(`after_commit failed; nothing pushed:\n${r.output}`);
     const extra = readAgentFile(gen, `${AGENT_META}/AFTER.diff`);

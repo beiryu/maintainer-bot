@@ -1,5 +1,5 @@
 You are resolving GitHub issue #{{number}} in {{repo}}, the maintainer's own repository.
-The repository is at /work. Do not commit.
+The repository is at {{workdir}}. Do not commit.
 
 Read the project's rules first: AGENTS.md, then .agents/coding-conventions.md and
 .agents/testing.md (or CONTRIBUTING*.md if those do not exist), and follow them.

@@ -17,6 +17,11 @@ export function sandboxEnv(run: Pick<SandboxRun, 'env'>): NodeJS.ProcessEnv {
   return { ...process.env, ...(run.env ?? {}) };
 }
 
+// Where a run sees its directories from the inside: the container mounts, or on a runner
+// the host paths themselves. Prompts and runtime flags are written with these.
+export const workPath = (cfg: Config, dir: string) => (cfg.sandbox.mode === 'docker' ? '/work' : resolve(dir));
+export const outPath = (cfg: Config, outDir: string) => (cfg.sandbox.mode === 'docker' ? '/out' : resolve(outDir));
+
 export function dockerArgs(cfg: Config, run: SandboxRun, name?: string): string[] {
   const args = [
     'run', '--rm', '-i', ...(name ? ['--name', name] : []),
@@ -37,12 +42,16 @@ export function dockerArgs(cfg: Config, run: SandboxRun, name?: string): string[
 /**
  * Runs a container with the run's timeout. Killing the docker client on timeout leaves the
  * container running, still burning CPU next to later runs, so it is removed by name.
+ * On a runner the command runs as is, in the run's directory; its process tree is killed.
  */
 export async function execSandbox(cfg: Config, run: SandboxRun, opts: { all?: boolean } = {}) {
+  const common = { reject: false, all: opts.all, timeout: run.timeoutMin * 60_000, env: sandboxEnv(run) } as const;
+  if (cfg.sandbox.mode === 'runner') {
+    const [file, ...args] = run.cmd;
+    return execa(file, args, { ...common, cwd: run.dir, forceKillAfterDelay: 5000 });
+  }
   const name = `maintainer-bot-${randomUUID().slice(0, 12)}`;
-  const r = await execa('docker', dockerArgs(cfg, run, name), {
-    reject: false, all: opts.all, timeout: run.timeoutMin * 60_000, env: sandboxEnv(run),
-  });
+  const r = await execa('docker', dockerArgs(cfg, run, name), common);
   if (r.timedOut || r.isTerminated) await execa('docker', ['rm', '-f', name], { reject: false });
   return r;
 }
