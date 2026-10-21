@@ -89,6 +89,8 @@ const Config = z.object({
   }),
   budget: z.object({
     max_cost_per_call_usd: z.number().default(3),
+    // No agent runs once this month's recorded spend reaches it (0: no limit); the dashboard says so.
+    max_cost_per_month_usd: z.number().default(0),
   }),
   sandbox: z.object({
     // docker: agents and gate commands run in a throwaway container on this machine.
@@ -130,6 +132,7 @@ export type RepoConfig = z.infer<typeof RepoConfig>;
 export type SourceConfig = z.infer<typeof Source>;
 export type Config = z.infer<typeof Config>;
 export const RepoConfigSchema = RepoConfig;
+export const parseConfig = (raw: unknown): Config => Config.parse(raw);
 
 /** `owner/name` → `owner`. */
 export const repoOwner = (fullName: string) => fullName.split('/')[0];

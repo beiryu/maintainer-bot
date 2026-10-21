@@ -1,0 +1,36 @@
+# .github/workflows/maintainer.yml — maintainer-bot for this repository.
+# Settings live in .github/maintainer-bot.yml. Secrets: MODEL_TOKEN (repo secret) and
+# BOT_PAT (environment "bot": a fine-grained PAT of the maintainer for this repo only, with
+# Contents, Issues and Pull requests read/write). The bot acts as the maintainer: it opens
+# issues and PRs under their name, with commits GitHub signs.
+name: maintainer-bot
+
+on:
+  issues:
+    types: [opened, assigned, edited]        # assigned to you → implemented; edited = dashboard ticks
+  issue_comment:
+    types: [created]                         # dashboard commands; review comments on the bot's PRs
+  pull_request_review:
+    types: [submitted]
+  pull_request_review_comment:
+    types: [created]
+  pull_request_target:
+    types: [opened, synchronize]             # other people's PRs: reviewed from the diff and CI, never run
+  check_suite:
+    types: [completed]                       # CI failed on a bot PR → a fix is drafted
+  schedule:
+    - cron: '0 2 * * 1'                      # weekly: upstream sources + audit
+  workflow_dispatch:
+
+# One pass at a time; a second event waits instead of running alongside.
+concurrency:
+  group: maintainer-bot
+  cancel-in-progress: false
+
+jobs:
+  bot:
+    uses: beiryu/maintainer-bot/.github/workflows/agent.yml@v1
+    with:
+      bot_ref: v1
+      draft_prs: true                        # pilot: PRs open as drafts; set false once trusted
+    secrets: inherit

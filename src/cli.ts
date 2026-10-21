@@ -4,6 +4,7 @@ import { randomUUID } from 'node:crypto';
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { runAudit } from './audit.js';
+import { ciAgent, ciConfig, ciPublish, pullState, pushState, setupOutputs, STATE_BRANCH } from './ci.js';
 import { loadConfig, repoConfig } from './config.js';
 import { doctor } from './doctor.js';
 import { addRepo, listRepos, removeRepo } from './onboard.js';
@@ -264,6 +265,51 @@ state.command('import <file>').description('replace data/state.db with the JSON 
   new Db().importJson(JSON.parse(readFileSync(file, 'utf8')));
   console.log(`data/state.db now holds ${file}`);
 });
+
+// --- GitHub Actions: `ci agent` in the read-only job, `ci publish` in the job with the maintainer's token.
+const ci = program.command('ci').description('the two steps of a run on GitHub Actions (see .github/workflows/agent.yml)');
+const ciOpts = (c: Command) => c
+  .requiredOption('--repo <owner/name>')
+  .requiredOption('--bot-config <file>', 'the repo\'s .github/maintainer-bot.yml');
+/** Config from the repo's own file; state from --state (required: a runner has no data/state.db worth keeping). */
+function ciCtx(o: { repo: string; botConfig: string }, verifyUser: boolean): Ctx {
+  const state = program.opts().state as string | undefined;
+  if (!state) throw new Error('ci commands need --state <file>');
+  const cfg = ciConfig(o.botConfig, o.repo);
+  if (verifyUser) expectUser(cfg.github_user);
+  return { cfg, db: stateDb(state), runId: randomUUID() };
+}
+ci.command('setup <file>').description('name=value lines for $GITHUB_OUTPUT: runtime, auth_env and the toolchains to install')
+  .action((file) => console.log(setupOutputs(file)));
+ciOpts(ci.command('state-pull')).description('write the state branch\'s state.json to --state (an empty state when there is none yet)')
+  .action(async (o) => {
+    const state = program.opts().state as string | undefined;
+    if (!state) throw new Error('needs --state <file>');
+    const { json, head } = await pullState(o.repo);
+    mkdirSync(dirname(state), { recursive: true });
+    writeFileSync(state, `${JSON.stringify(json ?? new Db(':memory:').exportJson(), null, 1)}\n`);
+    console.log(head ? `state from ${STATE_BRANCH} @ ${head.slice(0, 10)}` : 'no state branch yet; starting empty');
+  });
+ciOpts(ci.command('agent')).description('one pass with read access only: agents, gate, review; PRs wait for `ci publish`')
+  .option('--dry', 'work on issues without preparing PRs')
+  .action(async (o) => {
+    const c = ciCtx(o, false);
+    await ciAgent(c, { repo: o.repo, dry: !!o.dry });
+  });
+ciOpts(ci.command('publish')).description('with the maintainer\'s token: carry out dashboard ticks, open ready PRs, render the dashboard, save the state branch')
+  .option('--event <file>', 'the GitHub event payload ($GITHUB_EVENT_PATH)')
+  .option('--event-name <name>', '$GITHUB_EVENT_NAME')
+  .option('--run-url <url>', 'link to this workflow run, shown on the dashboard')
+  .option('--draft', 'open PRs as drafts')
+  .action(async (o) => {
+    const c = ciCtx(o, true);
+    const previous = await pullState(o.repo);
+    const event = o.event ? JSON.parse(readFileSync(o.event, 'utf8')) : undefined;
+    const notes = await ciPublish(c, { repo: o.repo, event, eventName: o.eventName, draft: !!o.draft, runUrl: o.runUrl });
+    for (const n of notes) console.log(`note: ${n}`);
+    const head = await pushState(o.repo, c.db.exportJson({ resultChars: 1500 }), previous);
+    console.log(head ? `state saved on ${STATE_BRANCH} @ ${head.slice(0, 10)}` : 'state unchanged');
+  });
 
 program.command('cost').description('spend by agent over the last 7 and 30 days').action(() => {
   const { db } = ctx();

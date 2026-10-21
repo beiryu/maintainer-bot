@@ -47,6 +47,10 @@ export interface Issue {
   dry: number;
   claimed_at: string | null;
   blocked: string | null;      // set when the repo's gate fails on the base too; cleared by `repo doctor`
+  // The change itself, kept here so a run on a fresh machine (a runner) has it; work/ only mirrors these.
+  patch: string | null;        // the gated diff against base_sha (PATCH.diff)
+  repro_patch: string | null;  // the reproducer's test alone (REPRO.diff)
+  repro_notes: string | null;
   updated_at: string;
 }
 
@@ -261,7 +265,9 @@ export class Db {
     const cols = (this.sql.prepare('PRAGMA table_info(agent_calls)').all() as { name: string }[]).map((c) => c.name);
     if (!cols.includes('models')) this.sql.exec('ALTER TABLE agent_calls ADD COLUMN models TEXT');
     const issueCols = (this.sql.prepare('PRAGMA table_info(issues)').all() as { name: string }[]).map((c) => c.name);
-    if (!issueCols.includes('blocked')) this.sql.exec('ALTER TABLE issues ADD COLUMN blocked TEXT');
+    for (const c of ['blocked', 'patch', 'repro_patch', 'repro_notes']) {
+      if (!issueCols.includes(c)) this.sql.exec(`ALTER TABLE issues ADD COLUMN ${c} TEXT`);
+    }
     const prCols = (this.sql.prepare('PRAGMA table_info(prs)').all() as { name: string }[]).map((c) => c.name);
     for (const c of ['head_sha', 'mergeable', 'ci_state', 'review_decision', 'snapshot_at', 'ci_seen_sha', 'merge_state']) {
       if (!prCols.includes(c)) this.sql.exec(`ALTER TABLE prs ADD COLUMN ${c} TEXT`);
@@ -271,13 +277,19 @@ export class Db {
   }
 
   // --- export / import ---
-  exportJson(keepCallsDays = 90): StateJson {
-    const since = new Date(Date.now() - keepCallsDays * 86_400_000).toISOString();
+  exportJson(opts: { keepCallsDays?: number; resultChars?: number } = {}): StateJson {
+    const since = new Date(Date.now() - (opts.keepCallsDays ?? 90) * 86_400_000).toISOString();
     const tables: StateJson['tables'] = {};
     for (const t of TABLES) {
       tables[t] = t === 'agent_calls'
         ? this.sql.prepare('SELECT * FROM agent_calls WHERE started_at >= ? ORDER BY id').all(since) as Record<string, unknown>[]
         : this.sql.prepare(`SELECT * FROM ${t}`).all() as Record<string, unknown>[];
+    }
+    // Agent output is kept for `show`; where the logs live elsewhere (Actions) a head is enough.
+    if (opts.resultChars) {
+      for (const row of tables.agent_calls) {
+        if (typeof row.result_json === 'string' && row.result_json.length > opts.resultChars) row.result_json = row.result_json.slice(0, opts.resultChars);
+      }
     }
     return { version: 1, exported_at: now(), tables };
   }
@@ -426,11 +438,11 @@ export class Db {
     return this.sql.prepare('SELECT * FROM prs WHERE issue_id = ?').get(issueId) as Pr | undefined;
   }
   /** Open PRs with their issue, newest first (for the inbox). */
-  openPrsWithIssue(): (Pr & { repo: string; issue_number: number; title: string; blocked: string | null })[] {
+  openPrsWithIssue(): (Pr & { repo: string; issue_number: number; title: string; pr_title: string | null; blocked: string | null })[] {
     return this.sql.prepare(
-      `SELECT p.*, i.repo, i.number AS issue_number, i.title, i.blocked FROM prs p JOIN issues i ON i.id = p.issue_id
+      `SELECT p.*, i.repo, i.number AS issue_number, i.title, i.pr_title, i.blocked FROM prs p JOIN issues i ON i.id = p.issue_id
        WHERE p.state = 'open' ORDER BY p.opened_at DESC`,
-    ).all() as (Pr & { repo: string; issue_number: number; title: string; blocked: string | null })[];
+    ).all() as (Pr & { repo: string; issue_number: number; title: string; pr_title: string | null; blocked: string | null })[];
   }
 
   // --- proposals (issues the auditor wants to open) ---

@@ -22,7 +22,12 @@ import { markDone, rmIdFromTitle } from './roadmap.js';
 import { runInSandbox, tail, workPath } from './sandbox.js';
 import { sourceDigest } from './watch.js';
 
-export interface Ctx { cfg: Config; db: Db; runId: string | null }
+export interface Ctx {
+  cfg: Config; db: Db; runId: string | null;
+  // Stop every issue at `reviewed` instead of opening its PR: a later step with write access
+  // (the publish job on a runner) opens it. Unlike `dry`, nothing waits for a person.
+  deferActions?: boolean;
+}
 
 const log = (msg: string) => console.log(`${new Date().toISOString()} ${msg}`);
 const NOT_FEASIBLE = 'triage: not feasible';
@@ -374,6 +379,7 @@ async function advance(ctx: Ctx, id: number): Promise<string | null> {
       case 'reviewed': {
         await writePr(ctx, rc, issue);
         if (issue.dry) return `#${issue.number} ready (dry run: PR not opened; \`show ${id}\` has the diff and the draft)`;
+        if (ctx.deferActions) return `#${issue.number} ready; the PR opens in the publish step`;
         const pr = await openPr(ctx, id);
         await notify(cfg, `maintainer-bot: PR mở sẵn — ${pr.url} (${issue.repo}#${issue.number} "${db.issue(id).pr_title}")\n`
           + `Merge trên GitHub; \`maintainer-bot show ${id}\` để xem diff.`);
@@ -410,12 +416,13 @@ async function reproduce(ctx: Ctx, rc: RepoConfig, issue: Issue) {
   });
   // The coder and reviewer read this: it often says why a test is impossible (e.g. nothing agreed to build yet).
   writeFileSync(join(issueDir(issue.repo, issue.number), 'REPRO_NOTES.txt'), r.notes);
+  db.update(issue.id, { repro_notes: r.notes });
   if (!r.reproduced || r.testFiles.length === 0 || !safeTestVars(r.testVars)) {
     // Not every issue is a bug a test can show; carry on without a regression test.
     log(`#${issue.number}: no regression test (${r.notes.slice(0, 160)})`);
     await prepareAgentWorkdir(issue.repo, issue.number, base); // drop anything the reproducer left
     rmSync(join(issueDir(issue.repo, issue.number), 'REPRO.diff'), { force: true });
-    return db.transition(issue.id, 'reproduced', { base_sha: base, test_files: '[]', test_vars: '{}', test_hashes: '{}' });
+    return db.transition(issue.id, 'reproduced', { base_sha: base, test_files: '[]', test_vars: '{}', test_hashes: '{}', repro_patch: null });
   }
 
   const withBase = db.update(issue.id, {
@@ -428,12 +435,24 @@ async function reproduce(ctx: Ctx, rc: RepoConfig, issue: Issue) {
   if (!r.testFiles.every((f) => files.includes(f))) return db.skip(issue.id, 'reported test files are not in the diff');
   focusedTestCommand(rc, withBase); // throws on unfilled variables
   writeFileSync(join(issueDir(issue.repo, issue.number), 'REPRO.diff'), reproPatch);
-  db.transition(issue.id, 'reproduced', { test_hashes: JSON.stringify(hashTestFiles(withBase)) });
+  db.transition(issue.id, 'reproduced', { test_hashes: JSON.stringify(hashTestFiles(withBase)), repro_patch: reproPatch });
+}
+
+/** The gated diff of an issue: from the record, or PATCH.diff for issues from before it was stored there. */
+export function loadPatch(issue: Issue): string {
+  if (issue.patch) return issue.patch;
+  return readFileSync(join(issueDir(issue.repo, issue.number), 'PATCH.diff'), 'utf8');
+}
+/** Stores the gated diff; PATCH.diff stays as a copy for `show` and the eye. */
+function savePatch(db: Db, issue: Issue, patch: string) {
+  mkdirSync(issueDir(issue.repo, issue.number), { recursive: true });
+  writeFileSync(join(issueDir(issue.repo, issue.number), 'PATCH.diff'), patch);
+  db.update(issue.id, { patch });
 }
 
 function reproNotes(issue: Issue): string {
   const file = join(issueDir(issue.repo, issue.number), 'REPRO_NOTES.txt');
-  const notes = existsSync(file) ? readFileSync(file, 'utf8').trim() : '';
+  const notes = (issue.repro_notes ?? (existsSync(file) ? readFileSync(file, 'utf8') : '')).trim();
   return notes ? `\nNotes from the agent that tried to reproduce it:\n<untrusted_notes>\n${untrusted(notes)}\n</untrusted_notes>` : '';
 }
 
@@ -480,12 +499,12 @@ async function gate(ctx: Ctx, rc: RepoConfig, issue: Issue) {
   if (!g.ok && g.kind === 'environment') return blockOnEnvironment(ctx, issue, g.step ?? '', g.reason);
   if (!g.ok) return retry(ctx, issue, `CI gate failed: ${g.reason}`);
   // From here on the canonical patch is a host-owned copy outside the agent's tree.
-  writeFileSync(join(issueDir(issue.repo, issue.number), 'PATCH.diff'), patch);
+  savePatch(ctx.db, issue, patch);
   ctx.db.transition(issue.id, 'gated');
 }
 
 async function reviewDir(issue: Issue): Promise<string> {
-  const patch = readFileSync(join(issueDir(issue.repo, issue.number), 'PATCH.diff'), 'utf8');
+  const patch = loadPatch(issue);
   const dir = join(issueDir(issue.repo, issue.number), 'review');
   await freshClone(issue.repo, issue.base_sha!, dir);
   await applyPatch(dir, patch);
@@ -607,7 +626,7 @@ export function branchFor(rc: Pick<RepoConfig, 'branch_prefix' | 'branch_name'>,
  * PR. When the issue is a roadmap item, a second commit marks it done in the roadmap, so the
  * squash-merge closes the loop. Idempotent: a branch or PR left by an earlier failure is reused.
  */
-export async function openPr(ctx: Ctx, id: number): Promise<{ url: string; number: number }> {
+export async function openPr(ctx: Ctx, id: number, opts: { draft?: boolean } = {}): Promise<{ url: string; number: number }> {
   const { cfg, db } = ctx;
   const issue = db.issue(id);
   const rc = repoConfig(cfg, issue.repo);
@@ -617,7 +636,7 @@ export async function openPr(ctx: Ctx, id: number): Promise<{ url: string; numbe
   if (gi.state !== 'OPEN') throw new Error('the issue has been closed meanwhile');
 
   const dir = issueDir(issue.repo, issue.number);
-  let patch = readFileSync(join(dir, 'PATCH.diff'), 'utf8');
+  let patch = loadPatch(issue);
   const fixed = staticChecks(patch, rc);
   if (!fixed.ok) throw new Error(fixed.reason);
   const title = issue.pr_title.trim();
@@ -634,7 +653,7 @@ export async function openPr(ctx: Ctx, id: number): Promise<{ url: string; numbe
   if (!closes) body = `${body.trim()}\n\nCloses #${issue.number}\n`;
   await git(push, [...who, 'commit', ...(rc.signoff ? ['--signoff'] : []), '-m', title, '-m', `Closes #${issue.number}`]);
   if (rc.after_commit.length) patch = await afterCommit(cfg, rc, push, issue.base_sha!, who);
-  writeFileSync(join(dir, 'PATCH.diff'), patch);
+  savePatch(db, issue, patch);
   await git(push, ['remote', 'add', 'fork', `https://github.com/${rc.full_name}.git`]);
 
   const head = `${repoOwner(rc.full_name)}:${branch}`;
@@ -660,7 +679,7 @@ export async function openPr(ctx: Ctx, id: number): Promise<{ url: string; numbe
     await git(push, ['reset', '--quiet', '--hard', 'FETCH_HEAD']);
   }
 
-  const pr = existing ?? await gh.createPr({ repo: issue.repo, base: rc.default_branch, head, title, body });
+  const pr = existing ?? await gh.createPr({ repo: issue.repo, base: rc.default_branch, head, title, body, draft: opts.draft });
   db.insertPr(id, pr.url, pr.number);
   db.transition(id, 'pr_open', { branch });
 
@@ -674,7 +693,7 @@ export async function openPr(ctx: Ctx, id: number): Promise<{ url: string; numbe
       const before = await git(push, ['rev-parse', 'HEAD']);
       await git(push, [...who, 'commit', '-q', '-m', `docs(repo): mark ${rm} done (#${pr.number})`]);
       await pushBranch(cfg, rc, push, branch, before, { who, expectedHead: tip });
-      writeFileSync(join(dir, 'PATCH.diff'), `${await git(push, ['diff', '--binary', issue.base_sha!, 'HEAD'])}\n`);
+      savePatch(db, issue, `${await git(push, ['diff', '--binary', issue.base_sha!, 'HEAD'])}\n`);
     } catch (e) {
       log(`#${issue.number}: roadmap not updated (${(e as Error).message.split('\n')[0]})`);
     }
@@ -783,7 +802,7 @@ async function followUp(ctx: Ctx, issueId: number): Promise<string | null> {
     for (const f of failed) parts.push(`[ci] check "${f.name}" failed on the PR's latest commit:\n${f.summary}`);
   }
   const text = parts.join('\n\n');
-  const patch = readFileSync(join(issueDir(issue.repo, issue.number), 'PATCH.diff'), 'utf8');
+  const patch = loadPatch(issue);
   const dir = await prepareAgentWorkdir(issue.repo, issue.number, issue.base_sha!);
   await applyPatch(dir, patch); // host applies before the agent touches the dir
 
@@ -847,7 +866,7 @@ async function prepareRebase(ctx: Ctx, rc: RepoConfig, issue: Issue, pr: Pr, why
   if (why === 'conflict' && db.get(key) === newBase) return `PR ${pr.url}: conflicts with ${rc.default_branch}; the rebase attempt on this base needs your help`;
   if (why === 'conflict') db.set(key, newBase);
   const dir = issueDir(issue.repo, issue.number);
-  const patch = readFileSync(join(dir, 'PATCH.diff'), 'utf8');
+  const patch = loadPatch(issue);
   const onNew = { ...issue, base_sha: newBase };
   const work = join(dir, 'rebase');
   await freshClone(issue.repo, newBase, work);
@@ -996,7 +1015,7 @@ async function approveRebase(ctx: Ctx, action: PendingAction, issue: Issue, pr: 
   const remoteSha = await git(push, ['rev-parse', 'FETCH_HEAD']);
   // The branch must still be exactly old base + PATCH.diff: never overwrite someone else's commit.
   await git(push, ['read-tree', '--reset', '-u', issue.base_sha!]);
-  await applyPatch(push, readFileSync(join(dir, 'PATCH.diff'), 'utf8'));
+  await applyPatch(push, loadPatch(issue));
   const unknown = await git(push, ['diff', '--cached', '--name-only', 'FETCH_HEAD']);
   if (unknown) {
     throw new Error(`the PR branch has changes the bot did not make (${unknown.split('\n').join(', ')}); `
@@ -1007,7 +1026,7 @@ async function approveRebase(ctx: Ctx, action: PendingAction, issue: Issue, pr: 
   await git(push, [...who, 'commit', ...(rc.signoff ? ['--signoff'] : []), '-m', issue.pr_title ?? `Fix #${issue.number}`, '-m', `Closes #${issue.number}`]);
   const full = await afterCommit(cfg, rc, push, action.base_sha!, who);
   const tip = await pushBranch(cfg, rc, push, issue.branch!, action.base_sha!, { who, expectedHead: remoteSha, force: true });
-  writeFileSync(join(dir, 'PATCH.diff'), full);
+  savePatch(db, issue, full);
   db.update(issue.id, { base_sha: action.base_sha });
   db.updatePr(issue.id, { head_sha: tip, mergeable: 'UNKNOWN', ci_state: 'pending' });
   db.setActionStatus(action.id, 'done');
@@ -1021,7 +1040,17 @@ export function followupCommitMessage(dir: string, draftTitle: string | null): s
   return m ? `${m[1]}: address review feedback` : 'Address review feedback';
 }
 
-export async function approveFollowup(ctx: Ctx, actionId: number) {
+/** The reply text as drafted, without the part written for the maintainer's eyes only. */
+export function replyText(message: string): string {
+  const cut = message.indexOf(OWN_REPLY);
+  return (cut >= 0 ? message.slice(0, cut) : message).trim();
+}
+
+/**
+ * `approve a<n>`: sends a drafted reply, fix or rebase. The message goes through the editor,
+ * unless `opts.message` is given (approved as drafted, e.g. from the dashboard).
+ */
+export async function approveFollowup(ctx: Ctx, actionId: number, opts: { message?: string } = {}) {
   const { cfg, db } = ctx;
   const action = db.action(actionId);
   if (action.status !== 'pending') throw new Error(`action is ${action.status}`);
@@ -1030,13 +1059,16 @@ export async function approveFollowup(ctx: Ctx, actionId: number) {
   const dir = issueDir(issue.repo, issue.number);
   if (action.kind === 'rebase') return approveRebase(ctx, action, issue, pr);
 
-  const msgFile = join(dir, `REPLY_${actionId}.md`);
-  writeFileSync(msgFile, action.message);
-  editInEditor(msgFile);
-  let message = readFileSync(msgFile, 'utf8');
-  const cut = message.indexOf(OWN_REPLY);
-  if (cut >= 0) message = message.slice(0, cut);
-  message = message.trim();
+  let message: string;
+  if (opts.message !== undefined) {
+    message = replyText(opts.message);
+  } else {
+    const msgFile = join(dir, `REPLY_${actionId}.md`);
+    mkdirSync(dir, { recursive: true });
+    writeFileSync(msgFile, action.message);
+    editInEditor(msgFile);
+    message = replyText(readFileSync(msgFile, 'utf8'));
+  }
   if (!message && !action.patch) throw new Error('empty reply; nothing sent');
 
   if (action.patch) {
@@ -1045,13 +1077,18 @@ export async function approveFollowup(ctx: Ctx, actionId: number) {
     if (!fixed.ok) throw new Error(fixed.reason);
     const push = join(dir, 'push');
     const who = await identity(cfg);
+    // The clone the PR was pushed from, or a new one on a machine that never had it.
+    if (!existsSync(join(push, '.git'))) {
+      await freshClone(issue.repo, issue.base_sha!, push);
+      await git(push, ['remote', 'add', 'fork', `https://github.com/${rc.full_name}.git`]);
+    }
     // Build on what is on the branch now, and only if it is exactly the patch we last pushed:
     // a commit made elsewhere (e.g. "Commit suggestion" on GitHub) must not be overwritten.
     await git(push, [...who, 'fetch', '--quiet', 'fork', issue.branch!]);
     await git(push, ['reset', '--quiet', '--hard', 'FETCH_HEAD']);
     const remoteSha = await git(push, ['rev-parse', 'HEAD']);
     await git(push, ['read-tree', '--reset', '-u', issue.base_sha!]);
-    await applyPatch(push, readFileSync(join(dir, 'PATCH.diff'), 'utf8'));
+    await applyPatch(push, loadPatch(issue));
     const unknown = await git(push, ['diff', '--cached', '--name-only', 'FETCH_HEAD']);
     await git(push, ['reset', '--quiet', '--hard', 'FETCH_HEAD']);
     if (unknown) {
@@ -1064,7 +1101,7 @@ export async function approveFollowup(ctx: Ctx, actionId: number) {
     await git(push, [...who, 'commit', ...(rc.signoff ? ['--signoff'] : []), '-m', followupCommitMessage(dir, issue.pr_title)]);
     const full = await afterCommit(cfg, rc, push, issue.base_sha!, who);
     await pushBranch(cfg, rc, push, issue.branch!, remoteSha, { who, expectedHead: remoteSha });
-    writeFileSync(join(dir, 'PATCH.diff'), full);
+    savePatch(db, issue, full);
   }
   if (message) await gh.commentOnIssue(issue.repo, pr.number, message);
   db.setActionStatus(actionId, 'done');

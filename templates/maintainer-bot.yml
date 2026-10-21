@@ -1,0 +1,29 @@
+# .github/maintainer-bot.yml — how maintainer-bot works on this repository.
+# The `bot:` block is the bot's own settings; everything else is the per-repo config
+# (the same keys as repos/<owner>__<name>.yaml when the bot runs on a machine).
+bot:
+  runtime: copilot                 # copilot | claude; MODEL_TOKEN is the matching credential
+  setup: [node@22, pnpm@12.11.2]   # toolchains installed before the gate: node@X, pnpm@X, go@X, uv
+  budget:
+    max_cost_per_call_usd: 3       # Copilot AI credits at $0.01 each
+    max_cost_per_month_usd: 100    # the bot stops for the month at this spend
+  limits:
+    max_attempts: 3
+    audit_interval_hours: 168      # audit at most weekly (the schedule in the workflow triggers it)
+
+default_branch: main
+branch_name: "{{type}}/{{number}}-{{slug}}"
+pick: assigned
+skip_labels: ["status: blocked", "help wanted", "good first issue"]
+focused_test: "pnpm install --frozen-lockfile --prefer-offline >/dev/null && pnpm build >/dev/null && pnpm exec vitest run {{file}}"
+gate:
+  - "pnpm install --frozen-lockfile --prefer-offline"
+  - "pnpm build"
+  - "pnpm test"
+forbidden_paths: [".github/", "pnpm-lock.yaml"]
+pr_types: [feat, fix, docs, test, refactor, chore]
+pr_scopes: []
+audit_files: [README.md, CONTRIBUTING.md, AGENTS.md]
+sources: []
+notes: |
+  Conventional Commits. End every new file with a newline.

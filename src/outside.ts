@@ -92,12 +92,15 @@ export async function reviewOutsidePrs(ctx: Ctx, rc: RepoConfig, log: (m: string
     log(`${rc.full_name} PR #${p.number}: review (by @${p.author})`);
     const { dir } = await checkoutPr(rc, p.number, p.headSha);
     // The PR's own code runs here: the sandbox has no credentials and the clone is throwaway.
+    // On a runner the job holds the model credential, so the PR's code is not run at all; the
+    // repo's own CI already ran it without secrets, and the reviewer reads that result instead.
     const steps: string[] = [];
-    for (const cmd of rc.gate) {
+    for (const cmd of cfg.sandbox.mode === 'runner' ? [] : rc.gate) {
       const r = await runInSandbox(cfg, dir, cmd);
       steps.push(`${r.exitCode === 0 ? '[ok]  ' : '[FAIL]'} ${cmd}${r.exitCode === 0 ? '' : `\n${tail(r.output, 15)}`}`);
       if (r.exitCode !== 0) break;
     }
+    if (cfg.sandbox.mode === 'runner') steps.push('(the gate was not run here; the CI line below is the repository\'s own checks on this head)');
     const linked = /\b(?:close[sd]?|fix(?:e[sd])?|resolve[sd]?)\s+#(\d+)/i.exec(p.body)?.[1];
     let linkedText = '(none)';
     if (linked) {
