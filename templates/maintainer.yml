@@ -7,9 +7,9 @@ name: maintainer-bot
 
 on:
   issues:
-    types: [opened, assigned, edited]        # assigned to you → implemented; edited = dashboard ticks
+    types: [opened, assigned]                # assigned to you → implemented. Not `edited`: the bot edits the dashboard
   issue_comment:
-    types: [created]                         # dashboard commands; review comments on the bot's PRs
+    types: [created]                         # /approve and other commands on the dashboard; comments on the bot's PRs
   pull_request_review:
     types: [submitted]
   pull_request_review_comment:

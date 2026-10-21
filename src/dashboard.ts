@@ -2,34 +2,29 @@ import type { Config } from './config.js';
 import { ACTIVE_STATES, type Db } from './db.js';
 import { replyText } from './orchestrator.js';
 
-// The inbox as a pinned GitHub issue, for a bot that runs on GitHub Actions: every decision
-// is a checkbox, ticking it is the approval; comments carry the few commands that are not
-// a yes. The body is rendered from the state after each run and parsed on each edit.
+// The inbox as a pinned GitHub issue, for a bot that runs on GitHub Actions. The bot alone
+// writes it (its edits start no run); the maintainer decides by commenting /approve, /reject
+// and the rest, and the bot answers each comment with what it did and the run log.
 
 export const DASHBOARD_MARK = '<!-- maintainer-bot:dashboard -->';
 export const DASHBOARD_TITLE = 'Maintainer Dashboard';
 
-/** One decision on the dashboard: its id (p7, a3, d2) and the variant ticked, if the item offers one. */
-export interface Tick { id: string; flag?: 'take' | 'changes' }
-
-/** Ids whose checkbox is ticked, in body order. */
-export function parseTicks(body: string): Tick[] {
-  const out: Tick[] = [];
-  for (const m of body.matchAll(/^\s*- \[[xX]\] .*<!-- mb:([pad]\d+)(?::(take|changes))? -->/gm)) {
-    out.push({ id: m[1], ...(m[2] ? { flag: m[2] as Tick['flag'] } : {}) });
-  }
-  return out;
-}
-
 export type Command =
+  | { cmd: 'approve'; id: string; flag?: 'take' | 'changes' }
   | { cmd: 'reject'; id: string; reason: string }
   | { cmd: 'retry'; number: number }
   | { cmd: 'take'; number: number };
 
-/** `/reject p8 reason…`, `/retry #14`, `/take 12`, one per line, anywhere in a comment. */
+/** `/approve a1 [--take|--changes]`, `/reject p8 reason…`, `/retry #14`, `/take 12`, one per line, anywhere in a comment. */
 export function parseCommands(comment: string): Command[] {
   const out: Command[] = [];
   for (const line of comment.split('\n')) {
+    const ap = /^\s*\/approve\s+([pad]\d+)\s*(--take|--changes|--request-changes)?\s*$/i.exec(line);
+    if (ap) {
+      const f = ap[2]?.toLowerCase();
+      out.push({ cmd: 'approve', id: ap[1].toLowerCase(), ...(f ? { flag: f === '--take' ? 'take' : 'changes' } as const : {}) });
+      continue;
+    }
     let m = /^\s*\/reject\s+([pad]\d+)\s*(.*)$/i.exec(line);
     if (m) { out.push({ cmd: 'reject', id: m[1].toLowerCase(), reason: m[2].trim() }); continue; }
     m = /^\s*\/(retry|take)\s+#?(\d+)\s*$/i.exec(line);
@@ -86,15 +81,15 @@ export function renderDashboard(db: Db, cfg: Config, info: DashboardInfo): strin
   }
 
   // --- 1. decisions
-  lines.push('## 1. Needs your decision', '', 'Tick a box to approve. To decline, comment `/reject <id> reason`.', '');
+  lines.push('## 1. Needs your decision', '', 'Comment on this issue to decide: `/approve <id>` or `/reject <id> reason`. The bot replies to your comment with what it did and a link to the run log.', '');
   let any = false;
   const proposals = db.proposals('pending', repo);
   if (proposals.length) {
     any = true;
-    lines.push('### Proposed issues (from the audit)', '', 'Ticking creates the issue and assigns it to you; the bot then implements it.', '');
+    lines.push('### Proposed issues (from the audit)', '', '`/approve` creates the issue and assigns it to you; the bot then implements it.', '');
     for (const p of proposals) {
       const covered = p.covers_issue || p.covers_rm ? ` · already tracked as ${[p.covers_issue ? iss(p.covers_issue) : '', p.covers_rm ?? ''].filter(Boolean).join(', ')}` : '';
-      lines.push(`- [ ] **p${p.id}** \`${p.kind}\` ${esc(p.title)} <!-- mb:p${p.id} -->`);
+      lines.push(`- **p${p.id}** \`${p.kind}\` ${esc(p.title)} → \`/approve p${p.id}\``);
       lines.push(`  proposed ${ago(p.created_at, now)}${covered}`);
       if (p.rationale) lines.push(`  **Why:** ${esc(p.rationale)}`);
       lines.push(details('Issue text', p.body));
@@ -104,14 +99,14 @@ export function renderDashboard(db: Db, cfg: Config, info: DashboardInfo): strin
   const actions = db.pendingActions().map((a) => ({ a, i: db.issue(a.issue_id) })).filter((x) => x.i.repo === repo);
   if (actions.length) {
     any = true;
-    lines.push("### Drafted follow-ups on the bot's pull requests", '', 'Ticking pushes the commit and/or posts the reply.', '');
+    lines.push("### Drafted follow-ups on the bot's pull requests", '', '`/approve` pushes the commit and/or posts the reply.', '');
     for (const { a, i } of actions) {
       const n = db.prForIssue(i.id)?.number ?? 0;
       const reply = replyText(a.message);
       const what = a.kind === 'rebase' ? `rebase ${pr(n)} onto the current base`
         : a.kind === 'fix' ? `push a fix to ${pr(n)}${reply ? ' and reply' : ' (no reply: the feedback came from a bot or CI)'}`
         : `reply on ${pr(n)}`;
-      lines.push(`- [ ] **a${a.id}** ${what} <!-- mb:a${a.id} -->`);
+      lines.push(`- **a${a.id}** ${what} → \`/approve a${a.id}\``);
       lines.push(`  "${esc(i.pr_title ?? i.title)}" · drafted ${ago(a.created_at, now)}`);
       if (a.kind === 'rebase') lines.push(`  ${esc(a.message)}`);
       else if (reply) lines.push(details('Reply to post', quote(reply)));
@@ -122,13 +117,13 @@ export function renderDashboard(db: Db, cfg: Config, info: DashboardInfo): strin
   const drafts = db.drafts('pending').filter((d) => d.repo === repo);
   if (drafts.length) {
     any = true;
-    lines.push("### Other people's issues and pull requests", '', 'Ticking posts the drafted reply or review as you.', '');
+    lines.push("### Other people's issues and pull requests", '', '`/approve` posts the drafted reply or review as you.', '');
     for (const d of drafts) {
       const link = d.target === 'pr' ? pr(d.number) : iss(d.number);
       const what = d.target === 'pr' ? `review ${link}` : `reply on ${link}`;
-      lines.push(`- [ ] **d${d.id}** ${what} by @${d.author} <!-- mb:d${d.id} -->`);
-      if (d.target === 'issue' && d.take) lines.push(`- [ ] **d${d.id}** + take: same, and assign the issue to you so the bot implements it <!-- mb:d${d.id}:take -->`);
-      if (d.target === 'pr') lines.push(`- [ ] **d${d.id}** + request changes: same, posted as "request changes" <!-- mb:d${d.id}:changes -->`);
+      const variant = d.target === 'issue' && d.take ? ` (or \`/approve d${d.id} --take\` to also assign it to you for the bot)`
+        : d.target === 'pr' ? ` (or \`/approve d${d.id} --changes\` to post it as "request changes")` : '';
+      lines.push(`- **d${d.id}** ${what} by @${d.author} → \`/approve d${d.id}\`${variant}`);
       lines.push(`  "${esc(d.title)}" · drafted ${ago(d.created_at, now)}`);
       lines.push(`  **Recommendation:** ${esc(d.recommendation.split('\n')[0])}`);
       lines.push(details(d.target === 'pr' ? 'Review to post' : 'Reply to post', quote(d.message)));
@@ -186,7 +181,7 @@ export function renderDashboard(db: Db, cfg: Config, info: DashboardInfo): strin
 
   // --- footer
   lines.push('---', '');
-  lines.push('Commands, one per line in a comment: `/reject p2 reason` · `/retry #14` · `/take 12` (assign issue #12 to you; the bot implements it) · `/pause` · `/resume`.');
+  lines.push('Commands, one per line in a comment: `/approve <id>` · `/reject <id> reason` · `/retry #14` · `/take 12` (assign issue #12 to you; the bot implements it) · `/pause` · `/resume`.');
   lines.push(`Runs on every event and daily; each agent call is capped at $${cfg.budget.max_cost_per_call_usd}.`);
   return lines.join('\n');
 }
@@ -198,7 +193,7 @@ export function renderDashboard(db: Db, cfg: Config, info: DashboardInfo): strin
  */
 export function dashboardChanged(before: string, after: string): boolean {
   const strip = (s: string) => s
-    .replace(/Updated \d{4}-\d{2}-\d{2} \d{2}:\d{2} UTC/g, '')
+    .replace(/_Updated [^\n]*_/g, '')        // timestamp, run log link, spend: they change every run
     .replace(/\d+ (min|h|d) ago/g, '')
     .replace(/BOT_PAT (has expired|expires in \d+ days)/g, '')
     .trim();

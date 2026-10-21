@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { DASHBOARD_MARK, dashboardChanged, parseCommands, parseTicks, renderDashboard } from '../src/dashboard.js';
+import { DASHBOARD_MARK, dashboardChanged, parseCommands, renderDashboard } from '../src/dashboard.js';
 import { Db } from '../src/db.js';
 
 const cfg = { repos: [{ full_name: 'o/r', sources: [] }], limits: { max_in_flight_per_repo: 1 }, budget: { max_cost_per_call_usd: 3 } } as never;
@@ -21,28 +21,26 @@ function populated() {
 }
 
 describe('renderDashboard', () => {
-  it('lists every decision as a checkbox with its id marker, and the rest as status', () => {
+  it('lists every decision with the command that approves it, and the rest as status', () => {
     const { db, a, p, d1, d2 } = populated();
     const body = renderDashboard(db, cfg, { repo: 'o/r', monthCostUsd: 1.25, monthLimitUsd: 50, now: Date.parse('2026-10-21T10:00:00Z') });
     expect(body.startsWith(DASHBOARD_MARK)).toBe(true);
-    expect(body).toContain(`- [ ] **p${p}** \`gap\` core: negative amounts unhandled <!-- mb:p${p} -->`);
+    expect(body).toContain(`- **p${p}** \`gap\` core: negative amounts unhandled → \`/approve p${p}\``);
     expect(body).toContain('already tracked as RM-013');
-    expect(body).toContain(`<!-- mb:p${p} -->`);
-    expect(body).toContain('**Problem**\nBody <!- - evil -->'); // headings demoted; untrusted text cannot smuggle a marker
-    expect(body).toContain(`<!-- mb:a${a} -->`);
+        expect(body).toContain('**Problem**\nBody <!- - evil -->'); // headings demoted; untrusted text cannot smuggle a marker
+    expect(body).toContain(`→ \`/approve a${a}\``);
     expect(body).toContain('> Fixed the null case.');
     expect(body).not.toContain('for you only');
-    expect(body).toContain(`<!-- mb:d${d1} -->`);
-    expect(body).toContain(`<!-- mb:d${d1}:take -->`);
-    expect(body).toContain(`<!-- mb:d${d2}:changes -->`);
-    expect(body).not.toContain(`<!-- mb:d${d2}:take -->`);
+    expect(body).toContain(`\`/approve d${d1} --take\``);
+    expect(body).toContain(`\`/approve d${d2} --changes\``);
+    expect(body).not.toContain(`\`/approve d${d2} --take\``);
     expect(body).toContain('[PR #20](https://github.com/o/r/pull/20) "fix(x): thing" · CI failed · changes requested');
     expect(body).toContain('[#2](https://github.com/o/r/issues/2) "issue 2" · coded, attempt 1');
     expect(body).toContain('[#3](https://github.com/o/r/issues/3) "issue 3"\n  coder gave up: needs a decision');
     expect(body).toContain('spent this month: $1.25 of $50');
     expect(body).toContain('Updated 2026-10-21 10:00 UTC');
-    // Everything the bot wrote renders unticked; only a person ticks.
-    expect(parseTicks(body)).toEqual([]);
+    // Nothing the bot writes reads as a command.
+    expect(parseCommands(body)).toEqual([]);
   });
   it('says so when nothing waits, and warns about an expiring token', () => {
     const db = new Db(':memory:');
@@ -55,23 +53,10 @@ describe('renderDashboard', () => {
     const a = renderDashboard(db, cfg, { repo: 'o/r', now: Date.parse('2026-10-21T10:00:00Z') });
     const b = renderDashboard(db, cfg, { repo: 'o/r', now: Date.parse('2026-10-22T10:00:00Z') });
     expect(dashboardChanged(a, b)).toBe(false);
+    expect(dashboardChanged(a.replace('_Updated', '_Updated x [run log](https://x/runs/1)'), a.replace('_Updated', '_Updated y [run log](https://x/runs/2)'))).toBe(false);
     expect(dashboardChanged(a, `${a}\n- new`)).toBe(true);
     expect(dashboardChanged('- [ ] **p1** x · proposed 2 min ago', '- [ ] **p1** x · proposed 3 min ago')).toBe(false);
     expect(dashboardChanged('- [ ] **p1** x · proposed 2 min ago', '- [ ] **p2** x · proposed 2 min ago')).toBe(true);
-  });
-});
-
-describe('parseTicks', () => {
-  it('returns ticked ids with their variant, in order, and ignores unticked ones', () => {
-    const body = [
-      '- [ ] **p7** · x <!-- mb:p7 -->',
-      '- [x] **p8** · y <!-- mb:p8 -->',
-      '- [X] **d2** · z <!-- mb:d2:take -->',
-      '- [x] **d3** · w <!-- mb:d3:changes -->',
-      '- [x] not a bot item',
-      '  - [x] **a1** · indented <!-- mb:a1 -->',
-    ].join('\n');
-    expect(parseTicks(body)).toEqual([{ id: 'p8' }, { id: 'd2', flag: 'take' }, { id: 'd3', flag: 'changes' }, { id: 'a1' }]);
   });
 });
 
@@ -83,5 +68,10 @@ describe('parseCommands', () => {
       { cmd: 'take', number: 12 },
     ]);
     expect(parseCommands('/reject A3')).toEqual([{ cmd: 'reject', id: 'a3', reason: '' }]);
+    expect(parseCommands('/approve a1\n/approve d2 --take\n/approve D3 --request-changes\n/approve p4 --bogus')).toEqual([
+      { cmd: 'approve', id: 'a1' },
+      { cmd: 'approve', id: 'd2', flag: 'take' },
+      { cmd: 'approve', id: 'd3', flag: 'changes' },
+    ]);
   });
 });

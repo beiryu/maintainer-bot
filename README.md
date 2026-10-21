@@ -19,12 +19,12 @@ repos and asks before every post; maintainer-bot works on yours, so the only app
 
 ```
 sources ─(watch)─▶ upstream digest ─┐
-repo mirror ─(auditor)──────────────┴▶ proposal p<n> ─(tick / approve)─▶ GitHub issue, assigned to you
+repo mirror ─(auditor)──────────────┴▶ proposal p<n> ─(/approve p<n>)─▶ GitHub issue, assigned to you
 open issue assigned to you ─▶ claimed ─▶ reproduced ─▶ coded ─▶ gated ─▶ reviewed ─▶ pr_open ─(you merge)─▶ done
                            when it gives up: "bot dừng lại" on the dashboard; nothing is posted on GitHub
-open PR: CI failed / review comments / behind base ─(followup agent)─▶ drafted fix, reply or rebase ─(tick a<n>)─▶ pushed
-someone else's issue ─(maintainer-triage)─▶ draft d<n>: labels + reply ─(tick d<n> [+take])─▶ posted [+ assigned to you → pipeline]
-someone else's PR ─(pr-reviewer, from the diff and its CI)─▶ draft d<n>: review ─(tick d<n> [+changes])─▶ posted
+open PR: CI failed / review comments / behind base ─(followup agent)─▶ drafted fix, reply or rebase ─(/approve a<n>)─▶ pushed
+someone else's issue ─(maintainer-triage)─▶ draft d<n>: labels + reply ─(/approve d<n> [--take])─▶ posted [+ assigned to you → pipeline]
+someone else's PR ─(pr-reviewer, from the diff and its CI)─▶ draft d<n>: review ─(/approve d<n> [--changes])─▶ posted
 ```
 
 You take an issue the way any maintainer does, by assigning it to yourself. Other people's
@@ -39,11 +39,11 @@ The bot runs inside the repository it maintains, as a reusable workflow. Nothing
 your machine; you decide on a pinned **Maintainer Dashboard** issue, from the phone if you like.
 
 ```
-event (issue assigned to you, review comment, CI failed, weekly schedule, dashboard tick)
+event (issue assigned to you, review comment, CI failed, daily schedule, a /command on the dashboard)
   ▼
 agent job    read-only token + the model credential → agents, gate, reviewer → state file
   ▼
-publish job  your fine-grained PAT, no model credential → ticks carried out, PRs opened
+publish job  your fine-grained PAT, no model credential → /commands run and answered, PRs opened
              (commits through the API, signed by GitHub), dashboard rendered, state saved
              on the branch maintainer-bot/state
 ```
@@ -63,9 +63,12 @@ Setup, per repository:
 4. Run the workflow once by hand (Actions → maintainer-bot → Run workflow): it creates and
    pins the dashboard. Keep `draft_prs: true` until the first PRs look right.
 
-Then: assign an issue to yourself and the next run implements it; tick a checkbox on the
-dashboard to approve a proposal, a drafted fix or a reply; comment `/reject p8 reason`,
-`/retry #14`, `/take 12`, `/pause`, `/resume`.
+Then: assign an issue to yourself and the next run implements it. Decide on the dashboard by
+commenting, one command per line: `/approve p3`, `/approve a1`, `/approve d2 --take`,
+`/approve d4 --changes`, `/reject p8 reason`, `/retry #14`, `/take 12`, `/pause`, `/resume`.
+The bot answers each comment with what it did (the commit, the issue, the PR) or why it could
+not, and a link to the run log. The dashboard itself is written only by the bot; its edits do
+not start runs.
 
 Costs: Actions minutes are free for public repositories. Model spend is capped per agent
 call (`max_cost_per_call_usd`) and per month (`max_cost_per_month_usd`); the dashboard shows
@@ -116,7 +119,7 @@ credential (`runner`), which the runtime strips from the agents' shell. The agen
 untrusted: patches are exported from it and applied to clones the agent never touched;
 `copilot` runs with explicit tool grants, `--disable-builtin-mcps`, `--deny-tool=url`,
 `--secret-env-vars`, `--max-ai-credits`. Text from issues, PRs and upstream sources is wrapped
-as untrusted data in every prompt, and cannot forge a dashboard marker. On Actions the job
+as untrusted data in every prompt, and is never read as a command: only the maintainer's own comments are. On Actions the job
 that can write to GitHub runs no agent and no repository code; the job that runs agents can
 only read. Other people's PRs are never executed there: the reviewer reads the diff and the
 repository's own CI result.

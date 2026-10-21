@@ -210,10 +210,10 @@ export async function prReview(repo: string, number: number, body: string, event
   await gh(['pr', 'review', String(number), '-R', repo, `--${event}`, '--body-file', '-'], body, false);
 }
 
-export interface IssueComment { author: string; body: string; createdAt: string }
+export interface IssueComment { id: number; url: string; author: string; body: string; createdAt: string }
 export async function issueComments(repo: string, number: number): Promise<IssueComment[]> {
   const pages = await ghJson<any[]>(['api', '--paginate', '--slurp', `repos/${repo}/issues/${number}/comments`]);
-  return pages.flat().map((c) => ({ author: c.user.login, body: c.body ?? '', createdAt: c.created_at }));
+  return pages.flat().map((c) => ({ id: c.id, url: c.html_url, author: c.user.login, body: c.body ?? '', createdAt: c.created_at }));
 }
 
 export async function branchHead(repo: string, branch: string): Promise<string> {

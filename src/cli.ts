@@ -176,7 +176,7 @@ program.command('show <id>').description('an issue (triage, diff, PR draft, agen
 
 /** `approve <id>`: p<n> files a proposal as an issue; a<n> sends a drafted reply/fix/rebase; a dry-run issue id opens its PR. */
 async function approveAny(c: Ctx, id: string, o: { noEdit?: boolean; take?: boolean; requestChanges?: boolean }) {
-  if (isAction(id)) return approveFollowup(c, numId(id));
+  if (isAction(id)) { await approveFollowup(c, numId(id)); return; }
   if (isDraft(id)) {
     const d = c.db.draft(numId(id));
     if (d.status !== 'pending') throw new Error(`draft d${d.id} is ${d.status}`);
@@ -199,7 +199,7 @@ async function approveAny(c: Ctx, id: string, o: { noEdit?: boolean; take?: bool
     return console.log(`Opened ${pr.url}`);
   }
   const a = c.db.pendingActionFor(i.id);
-  if (a) return approveFollowup(c, a.id);
+  if (a) { await approveFollowup(c, a.id); return; }
   throw new Error(`issue ${id} is ${i.state}${i.blocked ? ` (blocked: ${i.blocked})` : ''}; nothing waits for your approval. \`maintainer-bot inbox\` lists what does.`);
 }
 program.command('approve <id>').description('p<n>: open the proposed issue; d<n>: post the triage reply / PR review drafted for someone else; a<n>: send a drafted reply/fix/rebase; <id> of a dry-run issue: open its PR')
@@ -296,7 +296,7 @@ ciOpts(ci.command('agent')).description('one pass with read access only: agents,
     const c = ciCtx(o, false);
     await ciAgent(c, { repo: o.repo, dry: !!o.dry });
   });
-ciOpts(ci.command('publish')).description('with the maintainer\'s token: carry out dashboard ticks, open ready PRs, render the dashboard, save the state branch')
+ciOpts(ci.command('publish')).description('with the maintainer\'s token: run the dashboard /commands, open ready PRs, render the dashboard, save the state branch')
   .option('--event <file>', 'the GitHub event payload ($GITHUB_EVENT_PATH)')
   .option('--event-name <name>', '$GITHUB_EVENT_NAME')
   .option('--run-url <url>', 'link to this workflow run, shown on the dashboard')

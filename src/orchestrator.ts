@@ -1025,7 +1025,7 @@ async function verifyBranchIsOurs(push: string, rc: RepoConfig, issue: Issue, ti
 }
 
 /** Replaces the PR branch with one commit of the rebased patch; refuses if the branch moved since the bot last pushed it. */
-async function approveRebase(ctx: Ctx, action: PendingAction, issue: Issue, pr: Pr) {
+async function approveRebase(ctx: Ctx, action: PendingAction, issue: Issue, pr: Pr): Promise<string> {
   const { cfg, db } = ctx;
   const rc = repoConfig(cfg, issue.repo);
   const fixed = staticChecks(action.patch!, rc);
@@ -1048,7 +1048,9 @@ async function approveRebase(ctx: Ctx, action: PendingAction, issue: Issue, pr: 
   db.update(issue.id, { base_sha: action.base_sha });
   db.updatePr(issue.id, { head_sha: tip, mergeable: 'UNKNOWN', ci_state: 'pending' });
   db.setActionStatus(action.id, 'done');
-  console.log(`Rebased ${pr.url} onto ${action.base_sha!.slice(0, 10)} and force-pushed ${issue.branch}`);
+  const done = `rebased ${pr.url} onto ${action.base_sha!.slice(0, 10)}; branch now at ${tip.slice(0, 7)}`;
+  console.log(done);
+  return done;
 }
 
 export function followupCommitMessage(dir: string, draftTitle: string | null): string {
@@ -1068,7 +1070,7 @@ export function replyText(message: string): string {
  * `approve a<n>`: sends a drafted reply, fix or rebase. The message goes through the editor,
  * unless `opts.message` is given (approved as drafted, e.g. from the dashboard).
  */
-export async function approveFollowup(ctx: Ctx, actionId: number, opts: { message?: string } = {}) {
+export async function approveFollowup(ctx: Ctx, actionId: number, opts: { message?: string } = {}): Promise<string> {
   const { cfg, db } = ctx;
   const action = db.action(actionId);
   if (action.status !== 'pending') throw new Error(`action is ${action.status}`);
@@ -1088,6 +1090,7 @@ export async function approveFollowup(ctx: Ctx, actionId: number, opts: { messag
     message = replyText(readFileSync(msgFile, 'utf8'));
   }
   if (!message && !action.patch) throw new Error('empty reply; nothing sent');
+  let pushed: string | null = null;
 
   if (action.patch) {
     const rc = repoConfig(cfg, issue.repo);
@@ -1113,11 +1116,13 @@ export async function approveFollowup(ctx: Ctx, actionId: number, opts: { messag
     await applyPatch(push, action.patch, base !== issue.base_sha);
     await git(push, [...who, 'commit', ...(rc.signoff ? ['--signoff'] : []), '-m', followupCommitMessage(dir, issue.pr_title)]);
     const full = await afterCommit(cfg, rc, push, base, who);
-    await pushBranch(cfg, rc, push, issue.branch!, remoteSha, { who, expectedHead: remoteSha });
+    pushed = await pushBranch(cfg, rc, push, issue.branch!, remoteSha, { who, expectedHead: remoteSha });
     savePatch(db, issue, full);
     if (base !== issue.base_sha) db.update(issue.id, { base_sha: base });
   }
   if (message) await gh.commentOnIssue(issue.repo, pr.number, message);
   db.setActionStatus(actionId, 'done');
-  console.log(`Follow-up sent on ${pr.url}:${action.patch ? ' commit pushed' : ''}${message ? ' reply posted' : ''}`);
+  const done = `${[pushed ? `pushed ${pushed.slice(0, 7)} to` : '', message ? 'replied on' : ''].filter(Boolean).join(' and ')} ${pr.url}`;
+  console.log(done);
+  return done;
 }

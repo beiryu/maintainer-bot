@@ -2,7 +2,7 @@ import { readFileSync } from 'node:fs';
 import { parse } from 'yaml';
 import { z } from 'zod';
 import { type Config, parseConfig, repoConfig, RepoConfigSchema, repoOwner } from './config.js';
-import { DASHBOARD_MARK, DASHBOARD_TITLE, dashboardChanged, parseCommands, parseTicks, renderDashboard, type Tick } from './dashboard.js';
+import { type Command, DASHBOARD_MARK, DASHBOARD_TITLE, dashboardChanged, parseCommands, renderDashboard } from './dashboard.js';
 import type { Db, StateJson } from './db.js';
 import { ensureMirror } from './git.js';
 import * as gh from './github.js';
@@ -13,7 +13,7 @@ import { approveDraft } from './outside.js';
 //   agent    reads GitHub with the Actions token, runs agents and the gate, writes nothing but
 //            the state file it hands over;
 //   publish  holds the maintainer's token and no model credential: opens the PRs the agent
-//            got ready, carries out what was ticked on the dashboard, renders the dashboard,
+//            got ready, runs and answers the /commands on the dashboard, renders it,
 //            saves the state on the `maintainer-bot/state` branch.
 // The repo's `.github/maintainer-bot.yml` is the per-repo config plus a `bot:` block.
 
@@ -135,34 +135,37 @@ async function findDashboard(ctx: Ctx, repo: string): Promise<{ number: number; 
   return null;
 }
 
-/** Carries out one ticked decision; the text returned is shown on the dashboard when it fails. */
-async function applyTick(ctx: Ctx, t: Tick): Promise<void> {
-  const { db } = ctx;
-  const n = Number(t.id.slice(1));
-  if (t.id.startsWith('p')) { await approveProposal(ctx, n, { edit: false }); return; }
-  if (t.id.startsWith('a')) { await approveFollowup(ctx, n, { message: db.action(n).message }); return; }
-  const d = db.draft(n);
-  if (d.status !== 'pending') throw new Error(`d${n} is ${d.status}`);
-  await approveDraft(ctx, d, replyText(d.message), { take: t.flag === 'take', requestChanges: t.flag === 'changes' });
-}
+/** The bot's own replies on the dashboard carry this, so they are never read back as commands. */
+export const REPLY_MARK = '<!-- maintainer-bot:reply -->';
 
-function applyCommand(ctx: Ctx, repo: string, c: ReturnType<typeof parseCommands>[number]): string {
+/** Carries out one command; returns what was done, in one line, or throws with why not. */
+async function applyCommand(ctx: Ctx, repo: string, c: Command): Promise<string> {
   const { cfg, db } = ctx;
+  if (c.cmd === 'approve') {
+    const n = Number(c.id.slice(1));
+    if (c.id.startsWith('p')) return approveProposal(ctx, n, { edit: false });
+    if (c.id.startsWith('a')) return approveFollowup(ctx, n, { message: db.action(n).message });
+    const d = db.draft(n);
+    if (d.status !== 'pending') throw new Error(`d${n} is already ${d.status}`);
+    return approveDraft(ctx, d, replyText(d.message), { take: c.flag === 'take', requestChanges: c.flag === 'changes' });
+  }
   if (c.cmd === 'reject') {
     const n = Number(c.id.slice(1));
     if (c.id.startsWith('p')) rejectProposal(ctx, n, c.reason);
     else if (c.id.startsWith('a')) db.setActionStatus(n, 'rejected');
     else db.setDraftStatus(n, 'rejected');
-    return `${c.id} rejected`;
+    return `${c.id} rejected${c.reason ? `: ${c.reason}` : ''}`;
   }
   const issue = db.issueByNumber(repo, c.number);
   if (issue) {
     db.update(issue.id, { state: 'discovered', skip_reason: null, attempts: 0, feedback: null, blocked: null });
     db.set(`handed-back:${issue.id}`, null);
   }
-  if (c.cmd === 'take') void gh.assign(repo, c.number, cfg.github_user);
-  return `#${c.number}: the next run works on it`;
+  if (c.cmd === 'take') await gh.assign(repo, c.number, cfg.github_user);
+  return `#${c.number} ${c.cmd === 'take' ? 'assigned to you; ' : ''}the bot works on it in the next run`;
 }
+
+const label = (c: Command) => c.cmd === 'approve' || c.cmd === 'reject' ? `${c.cmd} ${c.id}${'flag' in c && c.flag ? ` --${c.flag}` : ''}` : `${c.cmd} #${c.number}`;
 
 export async function ciPublish(ctx: Ctx, opts: PublishOpts): Promise<string[]> {
   const { cfg, db } = ctx;
@@ -174,32 +177,34 @@ export async function ciPublish(ctx: Ctx, opts: PublishOpts): Promise<string[]> 
   db.upsertRepo(repo);
   await ensureMirror(repo, rc.default_branch);
 
-  // 1. What the maintainer decided on the dashboard: read from the issue itself, not from the
-  // event that started this run (queued runs get replaced, and with them their payload).
+  // 1. Commands in the maintainer's comments on the dashboard, each handled once (by comment
+  // id, whatever event started this run), each answered with what was done and the run log.
   const dash = await findDashboard(ctx, repo);
   let decided = false;
   if (dash) {
-    for (const t of parseTicks(dash.body)) {
-      decided = true;
-      try { await applyTick(ctx, t); log(`${t.id}${t.flag ? `:${t.flag}` : ''}: done`); }
-      catch (e) { notes.push(`❌ ${t.id}: ${(e as Error).message.split('\n')[0].slice(0, 300)}`); log(`${t.id}: ${(e as Error).message}`); }
-    }
-    // Commands: the maintainer's comments since the last run; older ones were handled or predate the bot.
-    const seenKey = `dashboard-seen:${repo}`;
-    const seen = db.get(seenKey);
-    const comments = (await gh.issueComments(repo, dash.number)).filter((c) => c.author.toLowerCase() === me);
-    const fresh = seen ? comments.filter((c) => c.createdAt > seen) : [];
+    const doneKey = `dashboard-last-comment:${repo}`;
+    const lastDone = Number(db.get(doneKey) ?? 0);
+    const comments = await gh.issueComments(repo, dash.number);
+    // First run on this dashboard: earlier comments are history, not orders.
+    const fresh = lastDone ? comments.filter((c) => c.id > lastDone && c.author.toLowerCase() === me && !c.body.includes(REPLY_MARK)) : [];
     for (const c of fresh) {
-      for (const cmd of parseCommands(c.body)) {
-        decided = true;
-        try { log(applyCommand(ctx, repo, cmd)); } catch (e) { notes.push(`❌ ${JSON.stringify(cmd)}: ${(e as Error).message.slice(0, 300)}`); }
+      const cmds = parseCommands(c.body);
+      const pause = /^\s*\/pause\s*$/m.test(c.body), resume = /^\s*\/resume\s*$/m.test(c.body);
+      if (!cmds.length && !pause && !resume) continue;
+      decided = true;
+      const results: string[] = [];
+      for (const cmd of cmds) {
+        try { results.push(`✅ \`${label(cmd)}\`: ${await applyCommand(ctx, repo, cmd)}`); }
+        catch (e) { results.push(`❌ \`${label(cmd)}\`: ${(e as Error).message.split('\n')[0].slice(0, 300)}`); }
       }
-      if (/^\s*\/pause\s*$/m.test(c.body)) { db.set('paused', '1'); decided = true; }
-      if (/^\s*\/resume\s*$/m.test(c.body)) { db.set('paused', null); decided = true; }
+      if (pause) { db.set('paused', '1'); results.push('⏸ paused: no agent runs until `/resume`'); }
+      if (resume) { db.set('paused', null); results.push('▶️ resumed'); }
+      for (const r of results) log(r);
+      const reply = `${REPLY_MARK}\n> ${c.body.trim().split('\n')[0].slice(0, 200)}\n\n${results.join('\n')}${opts.runUrl ? `\n\n[Run log](${opts.runUrl})` : ''}`;
+      await gh.commentOnIssue(repo, dash.number, reply).catch((e) => log(`reply failed: ${(e as Error).message}`));
     }
-    const last = comments.at(-1)?.createdAt;
-    if (last && (!seen || last > seen)) db.set(seenKey, last);
-    else if (!seen) db.set(seenKey, new Date().toISOString());
+    const newest = comments.at(-1)?.id ?? 0;
+    db.set(doneKey, String(Math.max(lastDone, newest, 1)));
   }
 
   // 2. PRs the agent step got ready.

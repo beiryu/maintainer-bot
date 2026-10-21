@@ -6,12 +6,13 @@
 #            and hands over nothing but a state file (artifact). The model credential is the
 #            only secret here, and the runtime strips it from the agents' shell.
 #   publish  has the maintainer's fine-grained PAT (environment "bot") and no model credential:
-#            carries out what was ticked on the dashboard, opens the PRs the agent got ready
+#            opens the PRs the agent got ready
 #            (commits are made through the API, so GitHub signs them under the maintainer's
-#            account), renders the dashboard issue and saves the state on the branch
-#            maintainer-bot/state.
+#            account), runs the maintainer's /commands from the dashboard and answers each,
+#            renders the dashboard issue and saves the state on the branch maintainer-bot/state.
 #
-# Every event runs the whole pass; dashboard ticks are carried out by `publish` at its end.
+# Every event runs the whole pass. The dashboard is written by the bot only and its edits
+# start no run (callers do not subscribe to `issues: edited`): decisions come as comments.
 name: maintainer-bot
 
 on:
@@ -41,8 +42,7 @@ jobs:
     # later event replace a queued one, and a pass that skipped the agent would lose that work.
     # Not for edits of ordinary issues; a CI run only when it failed.
     if: >-
-      !(github.event_name == 'issues' && github.event.action == 'edited' && !contains(github.event.issue.body, 'maintainer-bot:dashboard'))
-      && (github.event_name != 'check_suite' || github.event.check_suite.conclusion == 'failure')
+      github.event_name != 'check_suite' || github.event.check_suite.conclusion == 'failure'
     runs-on: ubuntu-latest
     timeout-minutes: 120
     permissions:
@@ -109,7 +109,6 @@ jobs:
     # Runs after the agent, or alone for dashboard events; never when the agent step broke.
     if: >-
       always() && (needs.agent.result == 'success' || needs.agent.result == 'skipped')
-      && !(github.event_name == 'issues' && github.event.action == 'edited' && !contains(github.event.issue.body, 'maintainer-bot:dashboard'))
       && (github.event_name != 'check_suite' || github.event.check_suite.conclusion == 'failure')
     runs-on: ubuntu-latest
     timeout-minutes: 30
