@@ -780,11 +780,7 @@ async function followUp(ctx: Ctx, issueId: number): Promise<string | null> {
     if (pending) return `PR ${pr.url}: conflicts with ${rc.default_branch}, but a draft is still pending`;
     return prepareRebase(ctx, rc, issue, pr, 'conflict');
   }
-  // Behind the base on your own repo: nobody's approval to lose, so rebase as soon as it is mergeable otherwise.
-  if (snap.mergeState === 'BEHIND' && !pending && db.get(`behind-drafted:${issueId}`) !== snap.headSha) {
-    db.set(`behind-drafted:${issueId}`, snap.headSha);
-    return prepareRebase(ctx, rc, issue, pr, 'behind');
-  }
+  // Only behind the base: GitHub's "Update branch" does that, no draft needed.
 
   // 2. New review comments, and CI that failed on a commit not looked at yet.
   const comments = await gh.prCommentsSince(issue.repo, pr.number, pr.last_seen_at, rc.review_bots);

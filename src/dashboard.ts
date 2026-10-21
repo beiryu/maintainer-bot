@@ -38,8 +38,12 @@ const safe = (s: string) => s.replace(/<!--/g, '<!- -');
 const esc = (s: string) => safe(s).replace(/\r?\n/g, ' ').trim();
 // Headings inside a fold would render as big as the dashboard's own; bold lines read better there.
 const demote = (s: string) => s.replace(/^#{1,6}\s+(.+?)\s*#*$/gm, '**$1**');
-const details = (summary: string, body: string) => `  <details><summary>${summary}</summary>\n\n${demote(safe(body)).trim()}\n\n  </details>`;
-const quote = (s: string) => safe(s).trim().split('\n').map((l) => `  > ${l}`).join('\n');
+// Inside a list item every line must be indented, or the item ends and the fold renders empty.
+const details = (summary: string, body: string) => {
+  const inner = demote(safe(body)).trim().split('\n').map((l) => (l ? `  ${l}` : '')).join('\n');
+  return `\n  <details><summary>${summary}</summary>\n\n${inner}\n\n  </details>\n`;
+};
+const quote = (s: string) => safe(s).trim().split('\n').map((l) => `> ${l}`).join('\n');
 const diffLines = (patch: string) => patch.split('\n').filter((l) => /^[-+](?![-+]{2})/.test(l)).length;
 
 export interface DashboardInfo {

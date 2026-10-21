@@ -27,7 +27,7 @@ describe('renderDashboard', () => {
     expect(body.startsWith(DASHBOARD_MARK)).toBe(true);
     expect(body).toContain('_Updated 2026-10-21 10:00 UTC · $1.25/$50 this month_');
     expect(body).toContain(`- **p${p}** new issue: core: negative amounts unhandled (RM-013) → \`/approve p${p}\``);
-    expect(body).toContain('**Problem**\nBody <!- - evil -->'); // headings demoted; untrusted text cannot smuggle a marker
+    expect(body).toContain('  **Problem**\n  Body <!- - evil -->'); // headings demoted, indented into the item; no marker smuggled
     expect(body).toContain(`- **a${a}** fix + reply on [#20](https://github.com/o/r/pull/20) → \`/approve a${a}\``);
     expect(body).toContain('> Fixed the null case.');
     expect(body).not.toContain('for you only');
