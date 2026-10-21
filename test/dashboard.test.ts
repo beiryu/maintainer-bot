@@ -55,6 +55,8 @@ describe('renderDashboard', () => {
     const b = renderDashboard(db, cfg, { repo: 'o/r', now: Date.parse('2026-10-22T10:00:00Z') });
     expect(dashboardChanged(a, b)).toBe(false);
     expect(dashboardChanged(a, `${a}\n- new`)).toBe(true);
+    expect(dashboardChanged('- [ ] **p1** · x · 2 phút trước', '- [ ] **p1** · x · 3 phút trước')).toBe(false);
+    expect(dashboardChanged('- [ ] **p1** · x · 2 phút trước', '- [ ] **p2** · x · 2 phút trước')).toBe(true);
   });
 });
 

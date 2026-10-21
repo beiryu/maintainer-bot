@@ -178,8 +178,16 @@ export function renderDashboard(db: Db, cfg: Config, info: DashboardInfo): strin
   return lines.join('\n');
 }
 
-/** True when the dashboard body changed in a way worth an edit (everything but the timestamp line). */
+/**
+ * True when the dashboard body changed in a way worth an edit: everything but the timestamp
+ * and the relative times. (Each edit is an event that starts a run, which renders again: an
+ * edit for "2 phút trước" becoming "3 phút trước" would never stop.)
+ */
 export function dashboardChanged(before: string, after: string): boolean {
-  const strip = (s: string) => s.replace(/Cập nhật \d{4}-\d{2}-\d{2} \d{2}:\d{2} UTC/g, '').trim();
+  const strip = (s: string) => s
+    .replace(/Cập nhật \d{4}-\d{2}-\d{2} \d{2}:\d{2} UTC/g, '')
+    .replace(/\d+ (phút|giờ|ngày) trước/g, '')
+    .replace(/BOT_PAT hết hạn (rồi|sau \d+ ngày)/g, '')
+    .trim();
   return strip(before) !== strip(after);
 }
