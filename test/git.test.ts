@@ -58,3 +58,28 @@ describe('readAgentFile', () => {
     expect(() => readAgentFile(join(root, 'dir'), '../dir/../../' + outside.split('/').pop() + '/secret')).toThrow();
   });
 });
+
+describe('freshClone', () => {
+  it('fetches a base the shallow mirror does not have', async () => {
+    const { execaSync } = await import('execa');
+    const { mkdtempSync, writeFileSync, mkdirSync: mk } = await import('node:fs');
+    const { freshClone, mirrorDir, git } = await import('../src/git.js');
+    const run = (cwd: string, args: string[]) => execaSync('git', ['-c', 'user.name=t', '-c', 'user.email=t@x', '-c', 'commit.gpgsign=false', ...args], { cwd }).stdout.trim();
+    const origin = mkdtempSync(join(tmpdir(), 'origin-'));
+    run(origin, ['init', '-q', '-b', 'main']);
+    writeFileSync(join(origin, 'a'), '1\n'); run(origin, ['add', '-A']); run(origin, ['commit', '-qm', 'one']);
+    const old = run(origin, ['rev-parse', 'HEAD']);
+    writeFileSync(join(origin, 'a'), '2\n'); run(origin, ['commit', '-qam', 'two']);
+    run(origin, ['config', 'uploadpack.allowAnySHA1InWant', 'true']);
+    const repo = `t/fc${Date.now()}`;
+    const mirror = mirrorDir(repo);
+    mk(join(mirror, '..'), { recursive: true });
+    execaSync('git', ['-c', 'protocol.file.allow=always', 'clone', '-q', '--depth', '1', `file://${origin}`, mirror]);
+    expect(() => run(mirror, ['cat-file', '-e', `${old}^{commit}`])).toThrow();
+    const dest = mkdtempSync(join(tmpdir(), 'dest-'));
+    await freshClone(repo, old, join(dest, 'c'));
+    expect(await git(join(dest, 'c'), ['rev-parse', 'HEAD'])).toBe(old);
+    const { rmSync } = await import('node:fs');
+    rmSync(mirror, { recursive: true, force: true });
+  });
+});

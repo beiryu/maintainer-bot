@@ -51,8 +51,20 @@ export async function ensureMirror(repo: string, branch: string): Promise<string
   return git(dir, ['rev-parse', 'HEAD']);
 }
 
+/**
+ * Makes sure the mirror has `sha`. The mirror is a shallow clone of the branch tip, so an older
+ * base (a PR opened days ago, or a machine that just started) is fetched on its own.
+ */
+export async function ensureCommit(repo: string, sha: string) {
+  const dir = mirrorDir(repo);
+  const has = await execa('git', [...SAFE, 'cat-file', '-e', `${sha}^{commit}`], { cwd: dir, reject: false });
+  // Kept under a branch name: a clone of the mirror copies branches, not loose commits.
+  if (has.exitCode !== 0) await git(dir, ['fetch', '--quiet', '--depth', '1', 'origin', `+${sha}:refs/heads/mb-base-${sha.slice(0, 12)}`]);
+}
+
 /** An independent clone of the mirror at `sha` (no hardlinks or alternates back to it). */
 export async function freshClone(repo: string, sha: string, dest: string) {
+  await ensureCommit(repo, sha);
   rmSync(dest, { recursive: true, force: true });
   mkdirSync(join(dest, '..'), { recursive: true });
   await execa('git', [...SAFE, 'clone', '--no-hardlinks', '--no-checkout', `file://${mirrorDir(repo)}`, dest]);
