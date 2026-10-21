@@ -14,7 +14,7 @@ function populated() {
   const a = db.addAction(id(1), 'fix', 'Fixed the null case.\n\n<!-- maintainer-bot: your reply goes above this line -->\nfor you only', 'diff --git a/x b/x\n--- a/x\n+++ b/x\n@@ -1 +1 @@\n-a\n+b\n');
   db.transition(id(2), 'coded');
   db.skip(id(3), 'coder gave up: needs a decision'); db.set(`handed-back:${id(3)}`, 'now');
-  const p = db.addProposal({ repo: 'o/r', kind: 'gap', title: 'core: negative amounts unhandled', body: 'Body <!-- evil -->', labels: '[]', rationale: 'because', evidence: '[]', covers_issue: null, covers_rm: 'RM-013', run_id: null });
+  const p = db.addProposal({ repo: 'o/r', kind: 'gap', title: 'core: negative amounts unhandled', body: '## Problem\nBody <!-- evil -->', labels: '[]', rationale: 'because', evidence: '[]', covers_issue: null, covers_rm: 'RM-013', run_id: null });
   const d1 = db.addDraft({ repo: 'o/r', target: 'issue', number: 31, title: 'crash on x', author: 'someone', head_sha: null, message: 'Thanks, can you share…', labels_add: '[]', labels_remove: '[]', recommendation: 'take: looks real', take: 1 });
   const d2 = db.addDraft({ repo: 'o/r', target: 'pr', number: 32, title: 'feat(core): y', author: 'other', head_sha: 'abc', message: 'Tests miss the error path.', labels_add: '[]', labels_remove: '[]', recommendation: 'changes: tests', take: 0 });
   return { db, a, p, d1, d2 };
@@ -28,7 +28,7 @@ describe('renderDashboard', () => {
     expect(body).toContain(`- [ ] **p${p}** \`gap\` core: negative amounts unhandled <!-- mb:p${p} -->`);
     expect(body).toContain('already tracked as RM-013');
     expect(body).toContain(`<!-- mb:p${p} -->`);
-    expect(body).toContain('Body <!- - evil -->'); // untrusted text cannot smuggle a marker
+    expect(body).toContain('**Problem**\nBody <!- - evil -->'); // headings demoted; untrusted text cannot smuggle a marker
     expect(body).toContain(`<!-- mb:a${a} -->`);
     expect(body).toContain('> Fixed the null case.');
     expect(body).not.toContain('for you only');
