@@ -14,6 +14,7 @@ import {
   agentDir, AGENT_META, applyPatch, ensureMirror, freshClone, git, issueDir, mirrorDir, parsePatch,
   prepareAgentWorkdir, readAgentFile,
 } from './git.js';
+import { pushViaApi } from './gitapi.js';
 import * as gh from './github.js';
 import { notify } from './notify.js';
 import { reviewOutsidePrs, triageOutsideIssues } from './outside.js';
@@ -628,7 +629,7 @@ export async function openPr(ctx: Ctx, id: number): Promise<{ url: string; numbe
   await freshClone(issue.repo, issue.base_sha!, push);
   await git(push, ['checkout', '-b', branch]);
   await applyPatch(push, patch);
-  const who = await gh.gitIdentity(signingKey(cfg));
+  const who = await identity(cfg);
   const closes = new RegExp(`\\b(close[sd]?|fix(e[sd])?|resolve[sd]?)\\s+#${issue.number}\\b`, 'i').test(body);
   if (!closes) body = `${body.trim()}\n\nCloses #${issue.number}\n`;
   await git(push, [...who, 'commit', ...(rc.signoff ? ['--signoff'] : []), '-m', title, '-m', `Closes #${issue.number}`]);
@@ -639,17 +640,24 @@ export async function openPr(ctx: Ctx, id: number): Promise<{ url: string; numbe
   const head = `${repoOwner(rc.full_name)}:${branch}`;
   const existing = await gh.openPrForHead(issue.repo, head);
   const remote = (await git(push, [...who, 'ls-remote', '--heads', 'fork', branch])).split(/\s+/)[0];
+  // Through the API the branch gets new commit ids, so "already pushed" is judged by tree, and
+  // the local clone then continues from the branch's own tip.
+  let tip: string;
   if (!remote) {
-    await git(push, [...who, 'push', '-u', 'fork', branch]);
+    tip = await pushBranch(cfg, rc, push, branch, issue.base_sha!, { who, expectedHead: null });
   } else {
     await git(push, [...who, 'fetch', '--quiet', 'fork', branch]);
     const same = (await git(push, ['rev-parse', 'FETCH_HEAD^{tree}'])) === (await git(push, ['rev-parse', 'HEAD^{tree}']));
     if (same) {
-      await git(push, ['reset', '--quiet', '--hard', 'FETCH_HEAD']);
+      tip = remote;
     } else {
       if (existing) throw new Error(`${existing.url} already exists with different content; update it by hand`);
-      await git(push, [...who, 'push', '-u', `--force-with-lease=${branch}:${remote}`, 'fork', branch]);
+      tip = await pushBranch(cfg, rc, push, branch, issue.base_sha!, { who, expectedHead: remote, force: true });
     }
+  }
+  if (cfg.push_via === 'api') {
+    await git(push, [...who, 'fetch', '--quiet', 'fork', branch]);
+    await git(push, ['reset', '--quiet', '--hard', 'FETCH_HEAD']);
   }
 
   const pr = existing ?? await gh.createPr({ repo: issue.repo, base: rc.default_branch, head, title, body });
@@ -663,8 +671,9 @@ export async function openPr(ctx: Ctx, id: number): Promise<{ url: string; numbe
       const text = readFileSync(join(push, rc.roadmap_file), 'utf8');
       writeFileSync(join(push, rc.roadmap_file), markDone(text, rm, pr.number));
       await git(push, ['add', rc.roadmap_file]);
+      const before = await git(push, ['rev-parse', 'HEAD']);
       await git(push, [...who, 'commit', '-q', '-m', `docs(repo): mark ${rm} done (#${pr.number})`]);
-      await git(push, [...who, 'push', 'fork', branch]);
+      await pushBranch(cfg, rc, push, branch, before, { who, expectedHead: tip });
       writeFileSync(join(dir, 'PATCH.diff'), `${await git(push, ['diff', '--binary', issue.base_sha!, 'HEAD'])}\n`);
     } catch (e) {
       log(`#${issue.number}: roadmap not updated (${(e as Error).message.split('\n')[0]})`);
@@ -922,6 +931,25 @@ export function signingKey(cfg: Config): string | undefined {
   return k;
 }
 
+/** Git identity for the local commits: signed here with the key, or left for GitHub to sign (push_via: api). */
+const identity = (cfg: Config) => gh.gitIdentity(cfg.push_via === 'api' ? undefined : signingKey(cfg));
+
+/**
+ * Puts the commits `base..HEAD` of the `push` clone on `branch` of the repo: `git push` with
+ * the signed commits, or replayed through the API so GitHub signs them. `expectedHead` is the
+ * branch tip last seen (null: no branch yet); `force` replaces the branch, refusing if it
+ * moved. Returns the branch's new tip on GitHub.
+ */
+async function pushBranch(cfg: Config, rc: RepoConfig, push: string, branch: string, base: string,
+  opts: { who: string[]; expectedHead: string | null; force?: boolean }): Promise<string> {
+  if (cfg.push_via === 'api') return pushViaApi(rc.full_name, push, branch, base, opts);
+  const { who } = opts;
+  if (opts.expectedHead === null) await git(push, [...who, 'push', '-u', 'fork', `HEAD:refs/heads/${branch}`]);
+  else if (opts.force) await git(push, [...who, 'push', `--force-with-lease=${branch}:${opts.expectedHead}`, 'fork', `HEAD:refs/heads/${branch}`]);
+  else await git(push, [...who, 'push', 'fork', `HEAD:refs/heads/${branch}`]);
+  return git(push, ['rev-parse', 'HEAD']);
+}
+
 /**
  * Runs the repo's `after_commit` commands on the commit just made in `push` and folds what they
  * change into it. They run in the sandbox on a separate full-history clone; the host only reads
@@ -960,7 +988,7 @@ async function approveRebase(ctx: Ctx, action: PendingAction, issue: Issue, pr: 
   if (!fixed.ok) throw new Error(fixed.reason);
   const dir = issueDir(issue.repo, issue.number);
   const push = join(dir, 'push');
-  const who = await gh.gitIdentity(signingKey(cfg));
+  const who = await identity(cfg);
   await freshClone(issue.repo, action.base_sha!, push);
   await git(push, ['checkout', '-q', '-B', issue.branch!]); // freshClone leaves HEAD detached; push needs the branch
   await git(push, ['remote', 'add', 'fork', `https://github.com/${rc.full_name}.git`]);
@@ -978,10 +1006,10 @@ async function approveRebase(ctx: Ctx, action: PendingAction, issue: Issue, pr: 
   await applyPatch(push, action.patch!);
   await git(push, [...who, 'commit', ...(rc.signoff ? ['--signoff'] : []), '-m', issue.pr_title ?? `Fix #${issue.number}`, '-m', `Closes #${issue.number}`]);
   const full = await afterCommit(cfg, rc, push, action.base_sha!, who);
-  await git(push, [...who, 'push', `--force-with-lease=${issue.branch}:${remoteSha}`, 'fork', `HEAD:refs/heads/${issue.branch}`]);
+  const tip = await pushBranch(cfg, rc, push, issue.branch!, action.base_sha!, { who, expectedHead: remoteSha, force: true });
   writeFileSync(join(dir, 'PATCH.diff'), full);
   db.update(issue.id, { base_sha: action.base_sha });
-  db.updatePr(issue.id, { head_sha: await git(push, ['rev-parse', 'HEAD']), mergeable: 'UNKNOWN', ci_state: 'pending' });
+  db.updatePr(issue.id, { head_sha: tip, mergeable: 'UNKNOWN', ci_state: 'pending' });
   db.setActionStatus(action.id, 'done');
   console.log(`Rebased ${pr.url} onto ${action.base_sha!.slice(0, 10)} and force-pushed ${issue.branch}`);
 }
@@ -1016,11 +1044,12 @@ export async function approveFollowup(ctx: Ctx, actionId: number) {
     const fixed = staticChecks(action.patch, rc);
     if (!fixed.ok) throw new Error(fixed.reason);
     const push = join(dir, 'push');
-    const who = await gh.gitIdentity(signingKey(cfg));
+    const who = await identity(cfg);
     // Build on what is on the branch now, and only if it is exactly the patch we last pushed:
     // a commit made elsewhere (e.g. "Commit suggestion" on GitHub) must not be overwritten.
     await git(push, [...who, 'fetch', '--quiet', 'fork', issue.branch!]);
     await git(push, ['reset', '--quiet', '--hard', 'FETCH_HEAD']);
+    const remoteSha = await git(push, ['rev-parse', 'HEAD']);
     await git(push, ['read-tree', '--reset', '-u', issue.base_sha!]);
     await applyPatch(push, readFileSync(join(dir, 'PATCH.diff'), 'utf8'));
     const unknown = await git(push, ['diff', '--cached', '--name-only', 'FETCH_HEAD']);
@@ -1034,7 +1063,7 @@ export async function approveFollowup(ctx: Ctx, actionId: number) {
     await applyPatch(push, action.patch);
     await git(push, [...who, 'commit', ...(rc.signoff ? ['--signoff'] : []), '-m', followupCommitMessage(dir, issue.pr_title)]);
     const full = await afterCommit(cfg, rc, push, issue.base_sha!, who);
-    await git(push, [...who, 'push', 'fork', `HEAD:refs/heads/${issue.branch}`]);
+    await pushBranch(cfg, rc, push, issue.branch!, remoteSha, { who, expectedHead: remoteSha });
     writeFileSync(join(dir, 'PATCH.diff'), full);
   }
   if (message) await gh.commentOnIssue(issue.repo, pr.number, message);

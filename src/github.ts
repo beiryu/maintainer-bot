@@ -21,6 +21,39 @@ export async function ghJson<T>(args: string[]): Promise<T> {
   return JSON.parse(await gh(args)) as T;
 }
 
+/** One GraphQL call with variables; never retried (it may be a mutation). */
+export async function graphql<T>(query: string, variables: Record<string, unknown>): Promise<T> {
+  const out = JSON.parse(await gh(['api', 'graphql', '--input', '-'], JSON.stringify({ query, variables }), false));
+  if (out.errors?.length) throw new Error(`GraphQL: ${out.errors.map((e: { message: string }) => e.message).join('; ')}`);
+  return out.data as T;
+}
+
+// ---- refs and commits through the API (no git push): commits made this way are signed by
+// GitHub and show as Verified under the token's account, so no signing key leaves the machine.
+
+export async function refSha(repo: string, branch: string): Promise<string | null> {
+  try {
+    return (await gh(['api', `repos/${repo}/git/ref/heads/${branch}`, '--jq', '.object.sha'])).trim() || null;
+  } catch { return null; }
+}
+export async function createRef(repo: string, branch: string, sha: string) {
+  await gh(['api', `repos/${repo}/git/refs`, '-f', `ref=refs/heads/${branch}`, '-f', `sha=${sha}`], undefined, false);
+}
+export async function forceRef(repo: string, branch: string, sha: string) {
+  await gh(['api', '-X', 'PATCH', `repos/${repo}/git/refs/heads/${branch}`, '-f', `sha=${sha}`, '-F', 'force=true'], undefined, false);
+}
+
+export interface FileChanges { additions: { path: string; contents: string }[]; deletions: { path: string }[] }
+/** One commit on `branch` with the given file contents; fails if the branch moved past `expectedHeadOid`. Returns the new oid. */
+export async function createCommitOnBranch(repo: string, branch: string, expectedHeadOid: string,
+  message: { headline: string; body: string }, fileChanges: FileChanges): Promise<string> {
+  const data = await graphql<{ createCommitOnBranch: { commit: { oid: string } } }>(
+    'mutation($input:CreateCommitOnBranchInput!){createCommitOnBranch(input:$input){commit{oid}}}',
+    { input: { branch: { repositoryNameWithOwner: repo, branchName: branch }, expectedHeadOid, message, fileChanges } },
+  );
+  return data.createCommitOnBranch.commit.oid;
+}
+
 export interface GhIssue {
   number: number;
   title: string;

@@ -12,6 +12,12 @@ export async function git(cwd: string, args: string[]) {
   const r = await execa('git', [...SAFE, ...args], { cwd });
   return r.stdout.trim();
 }
+/** Raw output, for file contents that may be binary. */
+export async function gitBytes(cwd: string, args: string[]): Promise<Buffer> {
+  // execa drops a final newline by default, which would truncate every text file.
+  const r = await execa('git', [...SAFE, ...args], { cwd, encoding: 'buffer', stripFinalNewline: false });
+  return Buffer.from(r.stdout);
+}
 
 const WORK = resolve('work');
 export const slug = (repo: string) => repo.replace('/', '__');

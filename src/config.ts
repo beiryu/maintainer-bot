@@ -70,6 +70,10 @@ const Config = z.object({
   // Private half of an SSH key added to github_user as a *signing* key: every commit the bot
   // makes is then signed (Verified). Without passphrase, since runs are unattended.
   commit_signing_key: z.string().optional(),
+  // git: commits are made and pushed here, signed with commit_signing_key. api: the local
+  // commits are replayed through GitHub's API, which signs them itself (Verified under
+  // github_user); no key is needed, which is what a runner wants.
+  push_via: z.enum(['git', 'api']).default('git'),
   repos: z.array(RepoConfig).default([]),
   limits: z.object({
     // Issues the bot works on at once per repo (an open PR does not hold a slot).
