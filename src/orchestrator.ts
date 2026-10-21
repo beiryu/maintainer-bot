@@ -738,7 +738,7 @@ export async function approveProposal(ctx: Ctx, id: number, opts: { edit: boolea
   // The maintainer just approved it: no triage, straight into the pipeline.
   db.transition(issue.id, 'claimed', { score: 1, triage_reason: p.rationale });
   db.updateProposal(id, { status: 'filed', title, body, issue_number: created.number, issue_id: issue.id });
-  return `opened #${created.number}, assigned to you; the bot starts on it next run`;
+  return `opened #${created.number}, assigned to you`;
 }
 
 export function rejectProposal(ctx: Ctx, id: number, reason: string): Proposal {
@@ -1022,7 +1022,7 @@ async function verifyBranchIsOurs(push: string, rc: RepoConfig, issue: Issue, ti
       unknown = await foreign(mb);
       if (!unknown) return mb;
     }
-    throw new Error(`the PR branch has changes the bot did not make (${unknown.split('\n').join(', ')}); handle it by hand or reject the drafted action`);
+    throw new Error(`the PR branch has changes I did not make (${unknown.split('\n').join(', ')}); handle it by hand or reject the drafted action`);
   }
   return issue.base_sha!;
 }

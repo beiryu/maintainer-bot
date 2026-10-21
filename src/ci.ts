@@ -172,14 +172,15 @@ async function applyCommand(ctx: Ctx, repo: string, c: Command): Promise<string>
     db.set(`handed-back:${issue.id}`, null);
   }
   if (c.cmd === 'take') await gh.assign(repo, c.number, cfg.github_user);
-  return `#${c.number} ${c.cmd === 'take' ? 'assigned to you; ' : ''}the bot works on it in the next run`;
+  return `#${c.number} ${c.cmd === 'take' ? 'assigned to you and ' : ''}back in the queue`;
 }
 
 /** One readable line for a failure: a git/gh command line is noise, its exit code and stderr are not. */
 export function shortError(e: unknown): string {
   const msg = (e as Error).message ?? String(e);
   const cmd = /^Command failed with exit code (\d+): (git|gh)\b.*?\b(checkout|fetch|push|apply|clone|commit|api|pr|issue)\b/.exec(msg);
-  const stderr = (e as { stderr?: string }).stderr?.trim().split('\n').pop();
+  // gh prints the API's answer on stderr; keep its last line (the message) rather than the command line.
+  const stderr = ((e as { stderr?: string }).stderr ?? msg.split('\n').slice(1).join('\n')).trim().split('\n').filter(Boolean).pop();
   if (cmd) return `${cmd[2]} ${cmd[3]} failed (exit ${cmd[1]})${stderr ? `: ${stderr.slice(0, 160)}` : ''}`;
   return msg.split('\n')[0].slice(0, 200);
 }
@@ -301,7 +302,7 @@ export async function ciPublish(ctx: Ctx, opts: PublishOpts): Promise<string[]> 
       const pr = await openPr(ctx, i.id, { draft: opts.draft });
       log(`#${i.number}: opened ${pr.url}`);
     } catch (e) {
-      const why = (e as Error).message.split('\n')[0].slice(0, 300);
+      const why = shortError(e);
       db.skip(i.id, `PR could not be opened: ${why}`);
       db.set(`handed-back:${i.id}`, new Date().toISOString());
       notes.push(`❌ #${i.number}: PR not opened: ${why}`);
