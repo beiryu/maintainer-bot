@@ -26,7 +26,7 @@ pr_scopes: [core]
     expect(cfg.push_via).toBe('api');
     expect(cfg.sandbox.mode).toBe('runner');
     expect(cfg.sandbox.auth_env).toBe('COPILOT_GITHUB_TOKEN');
-    expect(cfg.budget).toEqual({ max_cost_per_call_usd: 3, max_cost_per_month_usd: 100 });
+    expect(cfg.budget).toEqual({ max_cost_per_call_usd: 3, max_cost_per_month_usd: 100, per_agent_usd: {} });
     expect(cfg.limits.audit_interval_hours).toBe(168);
     expect(cfg.limits.max_attempts).toBe(3);
     expect(cfg.repos[0].full_name).toBe('beiryu/vn-skills');

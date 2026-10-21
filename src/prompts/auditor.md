@@ -68,6 +68,25 @@ Weigh what would move these, and say so in the rationale of product proposals.
 {{traction}}
 </traction>
 
+Three people looked at the project before you. Their findings are the strongest material you
+have: turn the ones that matter into proposals, check doubtful ones against the code, and
+cite them (with their URLs, commands and outputs) in the proposal's evidence.
+
+Research outside the repository (web, with sources):
+<research>
+{{research}}
+</research>
+
+A newcomer trying the project from its README:
+<tryout>
+{{tryout}}
+</tryout>
+
+A code review, area by area:
+<inspection>
+{{inspection}}
+</inspection>
+
 What changed upstream in the data sources the repo is built from, if anything:
 
 <upstream_changes>

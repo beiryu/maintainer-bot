@@ -85,7 +85,7 @@ jobs:
       - name: Agent runtime
         run: |
           case "${{ steps.cfg.outputs.runtime }}" in
-            copilot) npm i -g @github/copilot@1.0.95 && copilot --version ;;
+            copilot) npm i -g @github/copilot@1.0.101 && copilot --version ;;
             claude)  curl -fsSL https://claude.ai/install.sh | bash && echo "$HOME/.local/bin" >> "$GITHUB_PATH" ;;
           esac
       - name: Load state

@@ -64,6 +64,8 @@ const RepoConfig = z.object({
   // already uses somewhere (any package.json), or one listed in allowed_dependencies.
   dependencies: z.enum(['none', 'existing']).default('none'),
   allowed_dependencies: z.array(z.string()).default([]),
+  // Before the auditor: research the web, try the project as a newcomer, inspect the code (three more agent calls).
+  deep_audit: z.boolean().default(false),
   // Packages the project publishes, for the traction numbers the auditor weighs (npm names).
   packages: z.array(z.string()).default([]),
   // Proposals an agent can implement become issues assigned to the maintainer right away;
@@ -100,6 +102,8 @@ const Config = z.object({
     max_cost_per_call_usd: z.number().default(3),
     // No agent runs once this month's recorded spend reaches it (0: no limit); the dashboard says so.
     max_cost_per_month_usd: z.number().default(0),
+    // A higher cap for some agents (the deep audit's steps), by agent name.
+    per_agent_usd: z.record(z.string(), z.number()).default({}),
   }),
   sandbox: z.object({
     // docker: agents and gate commands run in a throwaway container on this machine.
@@ -117,6 +121,9 @@ const Config = z.object({
     // token `gh` uses on the host.
     auth_env: z.enum(['COPILOT_GITHUB_TOKEN', 'ANTHROPIC_API_KEY', 'CLAUDE_CODE_OAUTH_TOKEN']).default('COPILOT_GITHUB_TOKEN'),
     model: z.string().optional(),
+    // Per agent: a stronger model and more reasoning where judgement matters (research, the audit).
+    models: z.record(z.string(), z.string()).default({}),
+    reasoning: z.record(z.string(), z.enum(['none', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max'])).default({}),
     cache_volume: z.string().default('maintainer-bot-cache'),
     agent_timeout_min: z.number().default(30),
     gate_timeout_min: z.number().default(60),

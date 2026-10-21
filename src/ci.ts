@@ -28,9 +28,11 @@ const BotBlock = z.object({
   runtime: z.enum(['copilot', 'claude']).default('copilot'),
   auth_env: z.enum(['COPILOT_GITHUB_TOKEN', 'ANTHROPIC_API_KEY', 'CLAUDE_CODE_OAUTH_TOKEN']).optional(),
   model: z.string().optional(),
+  models: z.record(z.string(), z.string()).default({}),
+  reasoning: z.record(z.string(), z.string()).default({}),
   // Toolchains the job installs before the gate runs: node@22, pnpm@12.11.2, go@1.24, uv.
   setup: z.array(z.string()).default([]),
-  budget: z.object({ max_cost_per_call_usd: z.number().optional(), max_cost_per_month_usd: z.number().optional() }).default({}),
+  budget: z.object({ max_cost_per_call_usd: z.number().optional(), max_cost_per_month_usd: z.number().optional(), per_agent_usd: z.record(z.string(), z.number()).optional() }).default({}),
   limits: z.object({
     max_attempts: z.number().optional(), max_triage_per_run: z.number().optional(), audit_interval_hours: z.number().optional(),
   }).default({}),
@@ -52,6 +54,7 @@ export function ciConfig(file: string, repo: string): Config {
     budget: bot.budget,
     sandbox: {
       mode: 'runner', runtime: bot.runtime, auth_env: bot.auth_env ?? RUNTIME_ENV[bot.runtime], model: bot.model,
+      models: bot.models, reasoning: bot.reasoning,
       agent_timeout_min: bot.agent_timeout_min, gate_timeout_min: bot.gate_timeout_min,
     },
     notify: {},

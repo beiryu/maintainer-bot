@@ -76,3 +76,13 @@ describe('parseCopilotUsage', () => {
     expect(parseCopilotUsage({ foo: 1 })).toEqual({ cost: null, inputTokens: null, outputTokens: null, models: [] });
   });
 });
+
+describe('deep audit agents', () => {
+  it('gives the web to the researcher only, and accepts findings with evidence', () => {
+    expect('web' in AGENTS.researcher && AGENTS.researcher.web).toBe(true);
+    expect('web' in AGENTS.tryout).toBe(false);
+    expect('web' in AGENTS.auditor).toBe(false);
+    const r = AGENTS.inspector.schema.parse({ findings: [{ title: 't', detail: 'd', evidence: ['$ x', 'out'] }] });
+    expect(r).toEqual({ findings: [{ title: 't', detail: 'd', evidence: ['$ x', 'out'] }], summary: '' });
+  });
+});

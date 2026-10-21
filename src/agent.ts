@@ -19,7 +19,22 @@ const READ = 'read' as const;
 const WRITE = 'write' as const;
 type Access = typeof READ | typeof WRITE;
 
+const Findings = z.object({
+  findings: z.array(z.object({
+    title: z.string(),
+    detail: z.string(),
+    evidence: z.array(z.string()).default([]),   // files, commands with their output, URLs
+  })).default([]),
+  summary: z.string().default(''),
+});
+
 export const AGENTS = {
+  // Deep audit, step 1: what is happening outside the repository. The only agent with the web.
+  researcher: { access: READ, web: true, maxTurns: 80, schema: Findings },
+  // Step 2: uses the project the way a newcomer would, in a throwaway checkout.
+  tryout: { access: WRITE, maxTurns: 80, schema: Findings },
+  // Step 3: reads the code area by area and runs the tests.
+  inspector: { access: WRITE, maxTurns: 80, schema: Findings },
   triage: {
     access: READ, maxTurns: 15,
     schema: z.object({ feasible: z.boolean(), score: z.number().min(0).max(1), reason: z.string() }),
@@ -264,10 +279,10 @@ function copilotTrace(outDir: string): RunTrace | null {
   return parseCopilotEvents(readAgentFile(outDir, join('copilot', 'session-state', session.name, 'events.jsonl')));
 }
 
-function copilotRun(cfg: Config, access: Access, prompt: string, out: string): RuntimeRun {
-  const tools = access === WRITE
+function copilotRun(cfg: Config, access: Access, prompt: string, out: string, o: { model?: string; effort?: string; web?: boolean; budget?: number } = {}): RuntimeRun {
+  const tools = [...(access === WRITE
     ? ['view', 'glob', 'grep', 'edit', 'create', 'apply_patch', 'bash', 'read_bash', 'write_bash', 'stop_bash', 'list_bash']
-    : ['view', 'glob', 'grep'];
+    : ['view', 'glob', 'grep']), ...(o.web ? ['web_fetch', 'web_search'] : [])];
   const allow = access === WRITE ? ['read', 'write', 'shell'] : ['read'];
   return {
     argv: [
@@ -279,12 +294,14 @@ function copilotRun(cfg: Config, access: Access, prompt: string, out: string): R
       // Explicit grants rather than --allow-all-tools/COPILOT_ALLOW_ALL, which can also trust
       // the folder and load the repo's hooks and MCP servers.
       ...allow.map((a) => `--allow-tool=${a}`),
-      '--deny-tool=url', '--deny-tool=memory',
+      // The web only for the agents that research; they produce text a person reviews.
+      ...(o.web ? ['--allow-tool=url', '--allow-all-urls'] : ['--deny-tool=url']), '--deny-tool=memory',
       // Strips the token from the agent's shell environment, not just from output.
       `--secret-env-vars=${cfg.sandbox.auth_env}`,
-      `--max-ai-credits=${Math.max(30, Math.round(cfg.budget.max_cost_per_call_usd * 100))}`,
+      `--max-ai-credits=${Math.max(30, Math.round((o.budget ?? cfg.budget.max_cost_per_call_usd) * 100))}`,
       `--usage-output-file=${out}/usage.json`,
-      ...(cfg.sandbox.model ? [`--model=${cfg.sandbox.model}`] : []),
+      ...(o.model ?? cfg.sandbox.model ? [`--model=${o.model ?? cfg.sandbox.model}`] : []),
+      ...(o.effort ? [`--reasoning-effort=${o.effort}`] : []),
     ],
     // Copilot's state dir, session log included, lands in the out dir so it survives a killed run.
     env: { COPILOT_HOME: `${out}/copilot` },
@@ -316,7 +333,10 @@ export async function runAgent<A extends AgentName>(ctx: { cfg: Config; db: Db; 
   const vars = { ...opts.vars, workdir: workPath(cfg, opts.workdir) };
   const prompt = fillTemplate(readFileSync(join(PROMPTS, `${opts.agent}.md`), 'utf8'), vars);
   const run = cfg.sandbox.runtime === 'copilot'
-    ? copilotRun(cfg, def.access, prompt, outPath(cfg, outDir))
+    ? copilotRun(cfg, def.access, prompt, outPath(cfg, outDir), {
+      model: cfg.sandbox.models[opts.agent], effort: cfg.sandbox.reasoning[opts.agent], web: 'web' in def && def.web,
+      budget: cfg.budget.per_agent_usd[opts.agent],
+    })
     : claudeRun(cfg, def.access, def.maxTurns, prompt);
 
   const startedAt = new Date().toISOString();
