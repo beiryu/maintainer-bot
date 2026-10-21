@@ -53,8 +53,8 @@ Setup, per repository:
 1. Copy [`templates/maintainer.yml`](templates/maintainer.yml) to `.github/workflows/maintainer.yml`
    and [`templates/maintainer-bot.yml`](templates/maintainer-bot.yml) to `.github/maintainer-bot.yml`
    (gate, focused test, conventions, scopes; the `bot:` block holds runtime, toolchains and budget).
-2. Secrets: `MODEL_TOKEN` as a repository secret (a Copilot fine-grained PAT with **only**
-   "Copilot Requests", or an Anthropic key with `runtime: claude`). `BOT_PAT` in an
+2. Secrets: `COPILOT_TOKEN` as a repository secret (a Copilot fine-grained PAT with **only**
+   "Copilot Requests", or an Anthropic key with `runtime: claude`). `MAINTAINER_TOKEN` in an
    environment named `bot`: a fine-grained PAT of yours for **this repository only**, with
    Contents, Issues and Pull requests read/write (Metadata read comes with it). Not Workflows:
    the bot must not be able to change `.github/`.
@@ -71,13 +71,13 @@ not, and a link to the run log. The dashboard itself is written only by the bot;
 not start runs.
 
 Private dashboard: set `bot.dashboard_repo: you/desk` (a private repo) and the dashboard issue
-lives there instead, one issue per maintained repo. Add `BOT_PAT` access to the desk repo
+lives there instead, one issue per maintained repo. Add `MAINTAINER_TOKEN` access to the desk repo
 (Issues read/write), and copy [`templates/desk.yml`](templates/desk.yml) into the desk as
-`.github/workflows/relay.yml` with a `DISPATCH_TOKEN` secret, so a comment there starts the run.
+`.github/workflows/relay.yml` with a `MAINTAINER_TOKEN` secret, so a comment there starts the run.
 
 Costs: Actions minutes are free for public repositories. Model spend is capped per agent
 call (`max_cost_per_call_usd`) and per month (`max_cost_per_month_usd`); the dashboard shows
-this month's total. The dashboard also warns when `BOT_PAT` is about to expire.
+this month's total. The dashboard also warns when `MAINTAINER_TOKEN` is about to expire.
 
 ## On your machine
 

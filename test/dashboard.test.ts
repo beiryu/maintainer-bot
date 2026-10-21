@@ -44,7 +44,7 @@ describe('renderDashboard', () => {
     const body = renderDashboard(db, cfg, { repo: 'o/r', tokenExpiry: '2026-10-30', now: Date.parse('2026-10-21T00:00:00Z') });
     expect(body).toContain('_Nothing._');
     expect(body).not.toContain('### Open PRs');
-    expect(body).toContain('BOT_PAT expires in 9 days');
+    expect(body).toContain('MAINTAINER_TOKEN expires in 9 days');
   });
   it('ignores the timestamp when deciding whether to re-post', () => {
     const db = new Db(':memory:');

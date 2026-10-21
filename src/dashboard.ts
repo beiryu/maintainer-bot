@@ -75,7 +75,7 @@ export function renderDashboard(db: Db, cfg: Config, info: DashboardInfo): strin
   for (const n of info.notes ?? []) L.push(`> ${esc(n)}`, '');
   if (info.tokenExpiry) {
     const days = Math.round((new Date(info.tokenExpiry).getTime() - now) / 86_400_000);
-    if (days <= 21) L.push(`> ⚠️ BOT_PAT ${days <= 0 ? 'has expired' : `expires in ${days} days`}`, '');
+    if (days <= 21) L.push(`> ⚠️ MAINTAINER_TOKEN ${days <= 0 ? 'has expired' : `expires in ${days} days`}`, '');
   }
 
   const todo: string[] = [];
@@ -143,7 +143,7 @@ export function dashboardChanged(before: string, after: string): boolean {
   const strip = (s: string) => s
     .replace(/_Updated [^\n]*_/g, '')        // timestamp, run log link, spend: they change every run
     .replace(/\d+ (min|h|d) ago/g, '')
-    .replace(/BOT_PAT (has expired|expires in \d+ days)/g, '')
+    .replace(/MAINTAINER_TOKEN (has expired|expires in \d+ days)/g, '')
     .trim();
   return strip(before) !== strip(after);
 }

@@ -1,6 +1,6 @@
 # .github/workflows/relay.yml in the private desk repo that holds the dashboards.
 # A comment of yours on a dashboard issue starts maintainer-bot in the repo that issue is for.
-# Secret DISPATCH_TOKEN: fine-grained PAT, Actions read/write on the maintained repos.
+# Secret MAINTAINER_TOKEN: the same PAT the maintained repos use (Actions read/write on them).
 name: relay
 
 on:
@@ -15,7 +15,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - env:
-          GH_TOKEN: ${{ secrets.DISPATCH_TOKEN }}
+          GH_TOKEN: ${{ secrets.MAINTAINER_TOKEN || secrets.DISPATCH_TOKEN }}
           BODY: ${{ github.event.issue.body }}
         run: |
           repo=$(printf '%s' "$BODY" | sed -n 's/.*maintainer-bot:repo \([A-Za-z0-9_.-]*\/[A-Za-z0-9_.-]*\) -->.*/\1/p' | head -1)

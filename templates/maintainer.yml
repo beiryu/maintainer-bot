@@ -1,6 +1,6 @@
 # .github/workflows/maintainer.yml — maintainer-bot for this repository.
-# Settings live in .github/maintainer-bot.yml. Secrets: MODEL_TOKEN (repo secret) and
-# BOT_PAT (environment "bot": a fine-grained PAT of the maintainer for this repo only, with
+# Settings live in .github/maintainer-bot.yml. Secrets: COPILOT_TOKEN (repo secret) and
+# MAINTAINER_TOKEN (environment "bot": a fine-grained PAT of the maintainer for this repo only, with
 # Contents, Issues and Pull requests read/write). The bot acts as the maintainer: it opens
 # issues and PRs under their name, with commits GitHub signs.
 name: maintainer-bot
@@ -48,6 +48,6 @@ jobs:
     uses: beiryu/maintainer-bot/.github/workflows/agent.yml@0000000000000000000000000000000000000000 # v1
     with:
       draft_prs: true                        # pilot: PRs open as drafts; set false once trusted
-    # BOT_PAT lives in the environment "bot", which only the called workflow's publish job
+    # MAINTAINER_TOKEN lives in the environment "bot", which only the called workflow's publish job
     # enters; inherit is the only way an environment secret reaches a called workflow.
     secrets: inherit
