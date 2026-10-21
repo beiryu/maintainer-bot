@@ -63,12 +63,10 @@ Setup, per repository:
 4. Run the workflow once by hand (Actions → maintainer-bot → Run workflow): it creates and
    pins the dashboard. Keep `draft_prs: true` until the first PRs look right.
 
-Then: assign an issue to yourself and the next run implements it. Decide on the dashboard by
-commenting, one command per line: `/approve p3`, `/approve a1`, `/approve d2 --take`,
-`/approve d4 --changes`, `/reject p8 reason`, `/retry #14`, `/take 12`, `/pause`, `/resume`.
-The bot answers each comment with what it did (the commit, the issue, the PR) or why it could
-not, and a link to the run log. The dashboard itself is written only by the bot; its edits do
-not start runs.
+Then: assign an issue to yourself and the next run implements it. Each pending decision is a
+comment on the dashboard with 👍 Approve / 👎 Reject links: a link opens a new desk issue titled
+with the command; submit it and the run answers and closes it. Commands typed in a comment
+work too: `/approve p3`, `/reject p8 reason`, `/retry #14`, `/take 12`, `/pause`, `/resume`.
 
 Private dashboard: set `bot.dashboard_repo: you/desk` (a private repo) and the dashboard issue
 lives there instead, one issue per maintained repo. Add `MAINTAINER_TOKEN` access to the desk repo

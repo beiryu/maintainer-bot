@@ -244,14 +244,7 @@ export async function ciPublish(ctx: Ctx, opts: PublishOpts): Promise<string[]> 
   async function runCommands(text: string): Promise<string | null> {
     {
       const c = { body: text };
-      // `/a all`: every pending item an agent can carry out; [needs you] proposals stay.
-      const cmds = parseCommands(c.body).flatMap((cmd) => cmd.cmd === 'approve' && cmd.id === 'all'
-        ? [
-          ...db.proposals('pending', repo).filter((p) => !p.rationale.startsWith('[needs')).map((p) => ({ ...cmd, id: `p${p.id}` })),
-          ...db.pendingActions().filter((a) => db.issue(a.issue_id).repo === repo).map((a) => ({ ...cmd, id: `a${a.id}` })),
-          ...db.drafts('pending').filter((d) => d.repo === repo).map((d) => ({ ...cmd, id: `d${d.id}` })),
-        ]
-        : [cmd]);
+      const cmds = parseCommands(c.body);
       const pause = /^\s*\/pause\s*$/m.test(c.body), resume = /^\s*\/resume\s*$/m.test(c.body);
       if (!cmds.length && !pause && !resume) return null;
       decided = true;
@@ -267,32 +260,11 @@ export async function ciPublish(ctx: Ctx, opts: PublishOpts): Promise<string[]> 
     }
   }
 
-  // 1b. Reactions on the item comments: 👍 approve, 👎 reject, 🚀 approve with the item's variant.
-  // Reactions start no workflow; a frequent schedule brings the run that reads them.
+  // 1b. Item cards: one comment per pending decision, with its links.
   if (dash) {
     const itemKey = (id: string) => `item:${desk}:${repo}:${id}`;
     const pending = new Set(pendingItems(db, repo).map((it) => it.id));
-    for (const k of db.allKeys(`item:${desk}:${repo}:`)) {
-      const id = k.slice(`item:${desk}:${repo}:`.length);
-      const commentId = Number(db.get(k));
-      if (!pending.has(id)) continue;
-      let reactions: { content: string; user: string }[];
-      try { reactions = (await gh.commentReactions(desk, commentId)).filter((r) => r.user.toLowerCase() === me); }
-      catch { continue; }
-      const has = (c: string) => reactions.some((r) => r.content === c);
-      const kind = id[0];
-      const cmd: Command | null = has('-1') ? { cmd: 'reject', id, reason: '' }
-        : has('rocket') && kind === 'd' ? { cmd: 'approve', id, flag: db.draft(Number(id.slice(1))).target === 'pr' ? 'changes' : 'take' }
-        : has('+1') || has('rocket') ? { cmd: 'approve', id } : null;
-      if (!cmd) continue;
-      decided = true;
-      let result: string;
-      try { result = `✅ ${await applyCommand(ctx, repo, cmd)}`; } catch (e) { result = `❌ ${shortError(e)}`; }
-      log(`${id}: ${result}`);
-      await gh.editComment(desk, commentId, `~~${id}~~ ${result}${opts.runUrl ? ` · [log](${opts.runUrl})` : ''}`).catch(() => undefined);
-      db.set(k, null);
-    }
-    // Items decided some other way (a text command): their comment says so; new items get one.
+    // Decided items: their card says so; new items get one.
     for (const k of db.allKeys(`item:${desk}:${repo}:`)) {
       const id = k.slice(`item:${desk}:${repo}:`.length);
       if (pending.has(id)) continue;

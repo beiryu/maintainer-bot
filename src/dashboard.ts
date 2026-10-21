@@ -17,35 +17,24 @@ export type Command =
   | { cmd: 'retry'; number: number }
   | { cmd: 'take'; number: number };
 
-/**
- * Commands, one per line, anywhere in a comment. Short forms for typing on a phone:
- * `/a p3 p4 a1` (several ids; `--take`/`--changes` apply to all of them), `/a all`,
- * `/r p5 reason`, plus `/approve`, `/reject`, `/retry #14`, `/take 12`.
- */
+/** `/approve a1 [--take|--changes]`, `/reject p8 reason…`, `/retry #14`, `/take 12`, one per line, anywhere in a text. */
 export function parseCommands(comment: string): Command[] {
   const out: Command[] = [];
   for (const line of comment.split('\n')) {
-    const ap = /^\s*\/(?:a|approve)\s+(.+?)\s*$/i.exec(line);
+    const ap = /^\s*\/approve\s+([pad]\d+)\s*(--take|--changes|--request-changes)?\s*$/i.exec(line);
     if (ap) {
-      const words = ap[1].toLowerCase().split(/[\s,]+/);
-      // An unknown option means a typo: better to do nothing than the wrong thing.
-      if (words.some((w) => w.startsWith('--') && !/^--(take|changes|request-changes)$/.test(w))) continue;
-      const f = words.find((w) => /^--(take|changes|request-changes)$/.test(w));
-      const flag = f ? { flag: f === '--take' ? 'take' : 'changes' } as const : {};
-      if (words.includes('all')) { out.push({ cmd: 'approve', id: 'all', ...flag }); continue; }
-      for (const id of words.filter((w) => /^[pad]\d+$/.test(w))) out.push({ cmd: 'approve', id, ...flag });
+      const f = ap[2]?.toLowerCase();
+      out.push({ cmd: 'approve', id: ap[1].toLowerCase(), ...(f ? { flag: f === '--take' ? 'take' : 'changes' } as const : {}) });
       continue;
     }
-    let m = /^\s*\/(?:r|reject)\s+((?:[pad]\d+[\s,]*)+)(.*)$/i.exec(line);
-    if (m) {
-      for (const id of m[1].toLowerCase().split(/[\s,]+/).filter(Boolean)) out.push({ cmd: 'reject', id, reason: m[2].trim() });
-      continue;
-    }
+    let m = /^\s*\/reject\s+([pad]\d+)\s*(.*)$/i.exec(line);
+    if (m) { out.push({ cmd: 'reject', id: m[1].toLowerCase(), reason: m[2].trim() }); continue; }
     m = /^\s*\/(retry|take)\s+#?(\d+)\s*$/i.exec(line);
     if (m) out.push({ cmd: m[1].toLowerCase() as 'retry' | 'take', number: Number(m[2]) });
   }
   return out;
 }
+
 // Text from agents, issues and PRs is untrusted: it must not be able to write a marker the parser would read.
 const safe = (s: string) => s.replace(/<!--/g, '<!- -');
 const esc = (s: string) => safe(s).replace(/\r?\n/g, ' ').trim();
@@ -110,14 +99,14 @@ export const commandLink = (label: string, cmd: string, desk: string, repo: stri
 /** The comment that stands for one pending item, with one link per decision. */
 export function itemComment(it: PendingItem, desk: string, repo: string): string {
   const links = [
-    commandLink('👍 Approve', `/a ${it.id}`, desk, repo),
-    commandLink('👎 Reject', `/r ${it.id}`, desk, repo),
-    ...(it.rocket ? [commandLink(`🚀 Approve and ${it.rocket}`, `/a ${it.id} ${it.id[0] === 'd' && /changes/.test(it.rocket) ? '--changes' : '--take'}`, desk, repo)] : []),
+    commandLink('👍 Approve', `/approve ${it.id}`, desk, repo),
+    commandLink('👎 Reject', `/reject ${it.id}`, desk, repo),
+    ...(it.rocket ? [commandLink(`🚀 Approve and ${it.rocket}`, `/approve ${it.id} ${it.id[0] === 'd' && /changes/.test(it.rocket) ? '--changes' : '--take'}`, desk, repo)] : []),
   ].join(' · ');
   return `${itemMark(it.id)}\n${it.line}\n\n${links}\n${it.detail}`;
 }
 
-/** `/a a3 (owner/repo)` → the repo and the command text without it; null when the title is not one. */
+/** `/approve a3 (owner/repo)` → the repo and the command text without it; null when the title is not one. */
 export function parseCommandTitle(title: string): { repo: string; text: string } | null {
   const m = /^\s*(\/.+?)\s*\(([\w.-]+\/[\w.-]+)\)\s*$/.exec(title);
   return m ? { repo: m[2], text: m[1] } : null;
@@ -149,7 +138,7 @@ export function renderDashboard(db: Db, cfg: Config, info: DashboardInfo): strin
   }
   const blocked = db.blockedIssues(repo);
   if (blocked.length) todo.push(`- gate broken on base: ${esc(blocked[0].blocked!)}`);
-  L.push('### To decide', '', ...(todo.length ? ['React on the comments below: 👍 approve · 👎 reject · 🚀 approve with the variant shown.', '', ...todo] : ['_Nothing._']), '');
+  L.push('### To decide', '', ...(todo.length ? ['Each item below has 👍 Approve / 👎 Reject links.', '', ...todo] : ['_Nothing._']), '');
 
   const prs = db.openPrsWithIssue().filter((p) => p.repo === repo);
   if (prs.length) {
@@ -175,7 +164,7 @@ export function renderDashboard(db: Db, cfg: Config, info: DashboardInfo): strin
     for (const s of src) L.push(`- **${s.name}**: ${esc(s.digest!.split('\n')[0])}`);
     L.push('');
   }
-  L.push('---', '`/a p3 p4` · `/a all` · `/r p5 why` · `/retry #N` · `/take N` · `/pause` · `/resume`');
+  L.push('---', 'Decide with the links on each item below. Also: `/retry #N` · `/take N` · `/pause` · `/resume`');
   return L.join('\n');
 }
 

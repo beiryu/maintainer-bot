@@ -31,14 +31,14 @@ describe('renderDashboard', () => {
     expect(body).toContain(`- **a${a}** fix + reply on [#20](https://github.com/o/r/pull/20)`);
     expect(body).toContain(`- **d${d1}** reply [#31](https://github.com/o/r/issues/31) @someone`);
     expect(body).toContain(`- **d${d2}** review [#32](https://github.com/o/r/pull/32) @other`);
-    expect(body).toContain('React on the comments below');
+    expect(body).toContain('Each item below has 👍 Approve / 👎 Reject links.');
     const items = pendingItems(db, 'o/r');
     expect(items.map((i) => i.id)).toEqual([`p${p}`, `a${a}`, `d${d1}`, `d${d2}`]);
     const card = (id: string) => itemComment(items.find((i) => i.id === id)!, 'me/desk', 'o/r');
     expect(card(`p${p}`)).toContain('  **Problem**\n  Body <!- - evil -->');
-    expect(card(`p${p}`)).toContain(`[👍 Approve](https://github.com/me/desk/issues/new?title=%2Fa%20p${p}%20(o%2Fr)) · [👎 Reject](https://github.com/me/desk/issues/new?title=%2Fr%20p${p}%20(o%2Fr))`);
-    expect(card(`d${d1}`)).toContain('title=%2Fa%20d' + d1 + '%20--take%20(o%2Fr)');
-    expect(card(`d${d2}`)).toContain('title=%2Fa%20d' + d2 + '%20--changes%20(o%2Fr)');
+    expect(card(`p${p}`)).toContain(`[👍 Approve](https://github.com/me/desk/issues/new?title=%2Fapprove%20p${p}%20(o%2Fr)) · [👎 Reject](https://github.com/me/desk/issues/new?title=%2Freject%20p${p}%20(o%2Fr))`);
+    expect(card(`d${d1}`)).toContain('title=%2Fapprove%20d' + d1 + '%20--take%20(o%2Fr)');
+    expect(card(`d${d2}`)).toContain('title=%2Fapprove%20d' + d2 + '%20--changes%20(o%2Fr)');
     expect(card(`a${a}`)).toContain('> Fixed the null case.');
     expect(card(`a${a}`)).not.toContain('for you only');
     expect(card(`d${d1}`)).toContain('🚀 Approve and also assign it to you');
@@ -71,10 +71,10 @@ describe('renderDashboard', () => {
 
 describe('parseCommandTitle', () => {
   it('reads the command and the repo from a command issue title', () => {
-    expect(parseCommandTitle('/a p4 (beiryu/vn-skills)')).toEqual({ repo: 'beiryu/vn-skills', text: '/a p4' });
-    expect(parseCommandTitle('/r d2 not now (o/r)')).toEqual({ repo: 'o/r', text: '/r d2 not now' });
+    expect(parseCommandTitle('/approve p4 (beiryu/vn-skills)')).toEqual({ repo: 'beiryu/vn-skills', text: '/approve p4' });
+    expect(parseCommandTitle('/reject d2 not now (o/r)')).toEqual({ repo: 'o/r', text: '/reject d2 not now' });
     expect(parseCommandTitle('beiryu/vn-skills')).toBeNull();
-    expect(parseCommands(parseCommandTitle('/a d2 --take (o/r)')!.text)).toEqual([{ cmd: 'approve', id: 'd2', flag: 'take' }]);
+    expect(parseCommands(parseCommandTitle('/approve d2 --take (o/r)')!.text)).toEqual([{ cmd: 'approve', id: 'd2', flag: 'take' }]);
   });
 });
 
@@ -86,13 +86,7 @@ describe('parseCommands', () => {
       { cmd: 'take', number: 12 },
     ]);
     expect(parseCommands('/reject A3')).toEqual([{ cmd: 'reject', id: 'a3', reason: '' }]);
-    expect(parseCommands('/a p3 p4, a1\n/a all\n/A d2 --take\n/r p5 p6 not now')).toEqual([
-      { cmd: 'approve', id: 'p3' }, { cmd: 'approve', id: 'p4' }, { cmd: 'approve', id: 'a1' },
-      { cmd: 'approve', id: 'all' },
-      { cmd: 'approve', id: 'd2', flag: 'take' },
-      { cmd: 'reject', id: 'p5', reason: 'not now' }, { cmd: 'reject', id: 'p6', reason: 'not now' },
-    ]);
-    expect(parseCommands('/approve a1\n/approve d2 --take\n/approve D3 --request-changes\n/approve p4 --bogus')).toEqual([
+    expect(parseCommands('/approve a1\n/approve d2 --take\n/approve D3 --request-changes\n/approve p4 --bogus\n/a p5')).toEqual([
       { cmd: 'approve', id: 'a1' },
       { cmd: 'approve', id: 'd2', flag: 'take' },
       { cmd: 'approve', id: 'd3', flag: 'changes' },

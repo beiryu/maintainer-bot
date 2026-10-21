@@ -18,7 +18,6 @@ on:
     types: [opened, synchronize]             # other people's PRs: reviewed from the diff and CI, never run
   schedule:
     - cron: '0 2 * * *'                      # daily 09:00 Vietnam: upstream sources + audit
-    - cron: '*/15 * * * *'                   # reactions on the dashboard and queued work (reactions start no run)
   workflow_dispatch:
 
 # The most GITHUB_TOKEN may do in the called workflow: its agent job reads with these, its

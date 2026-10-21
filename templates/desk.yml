@@ -13,7 +13,7 @@ permissions: {}
 
 jobs:
   relay:
-    # Comments on a dashboard, or an issue opened from a card link ("/a p4 (owner/repo)"); never what a run posts itself.
+    # Comments on a dashboard, or an issue opened from a card link ("/approve p4 (owner/repo)"); never what a run posts itself.
     if: >-
       github.actor == github.repository_owner && (
         (github.event_name == 'issue_comment' && contains(github.event.issue.body, 'maintainer-bot:repo ') && !contains(github.event.comment.body, '<!-- maintainer-bot:'))
