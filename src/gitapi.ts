@@ -11,9 +11,10 @@ export interface RefApi {
   refSha: typeof gh.refSha;
   createRef: typeof gh.createRef;
   forceRef: typeof gh.forceRef;
+  deleteRef: typeof gh.deleteRef;
   createCommitOnBranch: typeof gh.createCommitOnBranch;
 }
-const live: RefApi = { refSha: gh.refSha, createRef: gh.createRef, forceRef: gh.forceRef, createCommitOnBranch: gh.createCommitOnBranch };
+const live: RefApi = { refSha: gh.refSha, createRef: gh.createRef, forceRef: gh.forceRef, deleteRef: gh.deleteRef, createCommitOnBranch: gh.createCommitOnBranch };
 
 /** The files a commit touches, as createCommitOnBranch takes them (a rename is a deletion and an addition). */
 export async function commitFileChanges(dir: string, sha: string): Promise<gh.FileChanges> {
@@ -30,27 +31,36 @@ export async function commitFileChanges(dir: string, sha: string): Promise<gh.Fi
 /**
  * Replays the local commits `base..HEAD` of `dir` onto `branch` on GitHub. `expectedHead` is
  * the branch's tip as last seen (null: the branch does not exist and is created at `base`);
- * with `force` the branch is first reset to `base`, which replaces what it held, but only if
- * it still is at `expectedHead` (the same guarantee as --force-with-lease). Returns the new tip.
+ * with `force` the branch is replaced, but only if it still is at `expectedHead` (the same
+ * guarantee as --force-with-lease). The replacement is built on a scratch branch and the
+ * branch is moved once at the end: pointing a PR branch at its base even for a moment makes
+ * GitHub close the PR as empty. Returns the new tip.
  */
 export async function pushViaApi(repo: string, dir: string, branch: string, base: string,
   opts: { expectedHead: string | null; force?: boolean }, api: RefApi = live): Promise<string> {
-  let head: string;
+  const replay = async (onto: string, head: string) => {
+    const shas = (await git(dir, ['rev-list', '--reverse', `${base}..HEAD`])).split('\n').filter(Boolean);
+    for (const sha of shas) {
+      const [headline, ...rest] = (await git(dir, ['log', '-1', '--format=%B', sha])).split('\n');
+      head = await api.createCommitOnBranch(repo, onto, head, { headline, body: rest.join('\n').trim() }, await commitFileChanges(dir, sha));
+    }
+    return head;
+  };
   if (opts.expectedHead === null) {
     await api.createRef(repo, branch, base);
-    head = base;
-  } else if (opts.force) {
-    const now = await api.refSha(repo, branch);
-    if (now !== opts.expectedHead) throw new Error(`${branch} moved on GitHub (${now?.slice(0, 10)} ≠ ${opts.expectedHead.slice(0, 10)}); not replacing it`);
-    await api.forceRef(repo, branch, base);
-    head = base;
-  } else {
-    head = opts.expectedHead;
+    return replay(branch, base);
   }
-  const shas = (await git(dir, ['rev-list', '--reverse', `${base}..HEAD`])).split('\n').filter(Boolean);
-  for (const sha of shas) {
-    const [headline, ...rest] = (await git(dir, ['log', '-1', '--format=%B', sha])).split('\n');
-    head = await api.createCommitOnBranch(repo, branch, head, { headline, body: rest.join('\n').trim() }, await commitFileChanges(dir, sha));
+  if (!opts.force) return replay(branch, opts.expectedHead);
+  const now = await api.refSha(repo, branch);
+  if (now !== opts.expectedHead) throw new Error(`${branch} moved on GitHub (${now?.slice(0, 10)} ≠ ${opts.expectedHead.slice(0, 10)}); not replacing it`);
+  const scratch = `maintainer-bot/tmp-${Date.now().toString(36)}`;
+  await api.createRef(repo, scratch, base);
+  try {
+    const tip = await replay(scratch, base);
+    if (await api.refSha(repo, branch) !== opts.expectedHead) throw new Error(`${branch} moved on GitHub while the replacement was built; not replacing it`);
+    await api.forceRef(repo, branch, tip);
+    return tip;
+  } finally {
+    await api.deleteRef(repo, scratch).catch(() => undefined);
   }
-  return head;
 }

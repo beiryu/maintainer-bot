@@ -44,10 +44,11 @@ describe('pushViaApi', () => {
     let n = 0;
     const api: RefApi = {
       refSha: async () => sha,
-      createRef: async (_r, b, s) => { calls.push(`create ${b}@${s.slice(0, 4)}`); },
+      createRef: async (_r, b, s) => { calls.push(`create ${b.replace(/tmp-\w+/, 'tmp')}@${s.slice(0, 4)}`); },
       forceRef: async (_r, b, s) => { calls.push(`force ${b}@${s.slice(0, 4)}`); },
+      deleteRef: async (_r, b) => { calls.push(`delete ${b.replace(/tmp-\w+/, 'tmp')}`); },
       createCommitOnBranch: async (_r, b, head, m, f) => {
-        calls.push(`commit ${b} on ${head.slice(0, 4)}: ${m.headline} | ${m.body} | +${f.additions.map((a) => a.path)} -${f.deletions.map((d) => d.path)}`);
+        calls.push(`commit ${b.replace(/tmp-\w+/, 'tmp')} on ${head.slice(0, 4)}: ${m.headline} | ${m.body} | +${f.additions.map((a) => a.path)} -${f.deletions.map((d) => d.path)}`);
         return `new${++n}`;
       },
     };
@@ -74,11 +75,14 @@ describe('pushViaApi', () => {
     expect(calls).toHaveLength(2);
   });
 
-  it('force resets only when the branch is still where it was last seen', async () => {
+  it('force builds the replacement on a scratch branch and moves the PR branch once, never to the base', async () => {
     const { dir, base } = repo();
     const same = fake('abcd');
-    await pushViaApi('o/r', dir, 'b', base, { expectedHead: 'abcd', force: true }, same.api);
-    expect(same.calls[0]).toBe(`force b@${base.slice(0, 4)}`);
+    const tip = await pushViaApi('o/r', dir, 'b', base, { expectedHead: 'abcd', force: true }, same.api);
+    expect(tip).toBe('new2');
+    expect(same.calls[0]).toBe(`create maintainer-bot/tmp@${base.slice(0, 4)}`);
+    expect(same.calls.filter((c) => c.startsWith('force'))).toEqual(['force b@new2']);
+    expect(same.calls.at(-1)).toBe('delete maintainer-bot/tmp');
     const moved = fake('ffff');
     await expect(pushViaApi('o/r', dir, 'b', base, { expectedHead: 'abcd', force: true }, moved.api)).rejects.toThrow(/moved on GitHub/);
     expect(moved.calls).toEqual([]);

@@ -44,6 +44,9 @@ export async function refSha(repo: string, branch: string): Promise<string | nul
 export async function createRef(repo: string, branch: string, sha: string) {
   await gh(['api', `repos/${repo}/git/refs`, '-f', `ref=refs/heads/${branch}`, '-f', `sha=${sha}`], undefined, false);
 }
+export async function deleteRef(repo: string, branch: string) {
+  await gh(['api', '-X', 'DELETE', `repos/${repo}/git/refs/heads/${branch}`], undefined, false);
+}
 export async function forceRef(repo: string, branch: string, sha: string) {
   await gh(['api', '-X', 'PATCH', `repos/${repo}/git/refs/heads/${branch}`, '-f', `sha=${sha}`, '-F', 'force=true'], undefined, false);
 }
