@@ -567,6 +567,10 @@ export class Db {
   get(key: string): string | undefined {
     return (this.sql.prepare('SELECT value FROM kv WHERE key = ?').get(key) as { value: string } | undefined)?.value;
   }
+  /** Keys starting with `prefix`, for families of flags such as item:<desk>:<repo>:<id>. */
+  allKeys(prefix: string): string[] {
+    return (this.sql.prepare("SELECT key FROM kv WHERE key LIKE ? ESCAPE '\\' ORDER BY key").all(`${prefix.replace(/[\\%_]/g, (c) => `\\${c}`)}%`) as { key: string }[]).map((r) => r.key);
+  }
   set(key: string, value: string | null) {
     if (value === null) this.sql.prepare('DELETE FROM kv WHERE key = ?').run(key);
     else this.sql.prepare('INSERT INTO kv (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value').run(key, value);

@@ -2,7 +2,7 @@ import { readFileSync } from 'node:fs';
 import { parse } from 'yaml';
 import { z } from 'zod';
 import { type Config, parseConfig, repoConfig, RepoConfigSchema, repoOwner } from './config.js';
-import { type Command, DASHBOARD_MARK, dashboardChanged, dashboardTitle, parseCommands, renderDashboard, repoMark } from './dashboard.js';
+import { type Command, DASHBOARD_MARK, dashboardChanged, dashboardTitle, itemComment, parseCommands, pendingItems, renderDashboard, repoMark } from './dashboard.js';
 import type { Db, StateJson } from './db.js';
 import { ensureMirror } from './git.js';
 import * as gh from './github.js';
@@ -216,9 +216,16 @@ export async function ciPublish(ctx: Ctx, opts: PublishOpts): Promise<string[]> 
     const lastDone = Number(db.get(doneKey) ?? 0);
     const comments = await gh.issueComments(desk, dash.number);
     // First run on this dashboard: earlier comments are history, not orders.
-    const fresh = lastDone ? comments.filter((c) => c.id > lastDone && c.author.toLowerCase() === me && !c.body.includes(REPLY_MARK)) : [];
+    const fresh = lastDone ? comments.filter((c) => c.id > lastDone && c.author.toLowerCase() === me && !c.body.includes(REPLY_MARK) && !c.body.includes('maintainer-bot:item')) : [];
     for (const c of fresh) {
-      const cmds = parseCommands(c.body);
+      // `/a all`: every pending item an agent can carry out; [needs you] proposals stay.
+      const cmds = parseCommands(c.body).flatMap((cmd) => cmd.cmd === 'approve' && cmd.id === 'all'
+        ? [
+          ...db.proposals('pending', repo).filter((p) => !p.rationale.startsWith('[needs')).map((p) => ({ ...cmd, id: `p${p.id}` })),
+          ...db.pendingActions().filter((a) => db.issue(a.issue_id).repo === repo).map((a) => ({ ...cmd, id: `a${a.id}` })),
+          ...db.drafts('pending').filter((d) => d.repo === repo).map((d) => ({ ...cmd, id: `d${d.id}` })),
+        ]
+        : [cmd]);
       const pause = /^\s*\/pause\s*$/m.test(c.body), resume = /^\s*\/resume\s*$/m.test(c.body);
       if (!cmds.length && !pause && !resume) continue;
       decided = true;
@@ -235,6 +242,45 @@ export async function ciPublish(ctx: Ctx, opts: PublishOpts): Promise<string[]> 
     }
     const newest = comments.at(-1)?.id ?? 0;
     db.set(doneKey, String(Math.max(lastDone, newest, 1)));
+  }
+
+  // 1b. Reactions on the item comments: 👍 approve, 👎 reject, 🚀 approve with the item's variant.
+  // Reactions start no workflow; a frequent schedule brings the run that reads them.
+  if (dash) {
+    const itemKey = (id: string) => `item:${desk}:${repo}:${id}`;
+    const pending = new Set(pendingItems(db, repo).map((it) => it.id));
+    for (const k of db.allKeys(`item:${desk}:${repo}:`)) {
+      const id = k.slice(`item:${desk}:${repo}:`.length);
+      const commentId = Number(db.get(k));
+      if (!pending.has(id)) continue;
+      let reactions: { content: string; user: string }[];
+      try { reactions = (await gh.commentReactions(desk, commentId)).filter((r) => r.user.toLowerCase() === me); }
+      catch { continue; }
+      const has = (c: string) => reactions.some((r) => r.content === c);
+      const kind = id[0];
+      const cmd: Command | null = has('-1') ? { cmd: 'reject', id, reason: '' }
+        : has('rocket') && kind === 'd' ? { cmd: 'approve', id, flag: db.draft(Number(id.slice(1))).target === 'pr' ? 'changes' : 'take' }
+        : has('+1') || has('rocket') ? { cmd: 'approve', id } : null;
+      if (!cmd) continue;
+      decided = true;
+      let result: string;
+      try { result = `✅ ${await applyCommand(ctx, repo, cmd)}`; } catch (e) { result = `❌ ${shortError(e)}`; }
+      log(`${id}: ${result}`);
+      await gh.editComment(desk, commentId, `~~${id}~~ ${result}${opts.runUrl ? ` · [log](${opts.runUrl})` : ''}`).catch(() => undefined);
+      db.set(k, null);
+    }
+    // Items decided some other way (a text command): their comment says so; new items get one.
+    for (const k of db.allKeys(`item:${desk}:${repo}:`)) {
+      const id = k.slice(`item:${desk}:${repo}:`.length);
+      if (pending.has(id)) continue;
+      await gh.editComment(desk, Number(db.get(k)), `~~${id}~~ decided`).catch(() => undefined);
+      db.set(k, null);
+    }
+    for (const it of pendingItems(db, repo)) {
+      if (db.get(itemKey(it.id))) continue;
+      try { db.set(itemKey(it.id), String(await gh.addComment(desk, dash.number, itemComment(it)))); }
+      catch (e) { log(`${it.id}: item comment not posted: ${shortError(e)}`); }
+    }
   }
 
   // 2a. Proposals the agent can implement, on a repo that does not want to approve each one.

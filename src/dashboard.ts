@@ -17,24 +17,35 @@ export type Command =
   | { cmd: 'retry'; number: number }
   | { cmd: 'take'; number: number };
 
-/** `/approve a1 [--take|--changes]`, `/reject p8 reason…`, `/retry #14`, `/take 12`, one per line, anywhere in a comment. */
+/**
+ * Commands, one per line, anywhere in a comment. Short forms for typing on a phone:
+ * `/a p3 p4 a1` (several ids; `--take`/`--changes` apply to all of them), `/a all`,
+ * `/r p5 reason`, plus `/approve`, `/reject`, `/retry #14`, `/take 12`.
+ */
 export function parseCommands(comment: string): Command[] {
   const out: Command[] = [];
   for (const line of comment.split('\n')) {
-    const ap = /^\s*\/approve\s+([pad]\d+)\s*(--take|--changes|--request-changes)?\s*$/i.exec(line);
+    const ap = /^\s*\/(?:a|approve)\s+(.+?)\s*$/i.exec(line);
     if (ap) {
-      const f = ap[2]?.toLowerCase();
-      out.push({ cmd: 'approve', id: ap[1].toLowerCase(), ...(f ? { flag: f === '--take' ? 'take' : 'changes' } as const : {}) });
+      const words = ap[1].toLowerCase().split(/[\s,]+/);
+      // An unknown option means a typo: better to do nothing than the wrong thing.
+      if (words.some((w) => w.startsWith('--') && !/^--(take|changes|request-changes)$/.test(w))) continue;
+      const f = words.find((w) => /^--(take|changes|request-changes)$/.test(w));
+      const flag = f ? { flag: f === '--take' ? 'take' : 'changes' } as const : {};
+      if (words.includes('all')) { out.push({ cmd: 'approve', id: 'all', ...flag }); continue; }
+      for (const id of words.filter((w) => /^[pad]\d+$/.test(w))) out.push({ cmd: 'approve', id, ...flag });
       continue;
     }
-    let m = /^\s*\/reject\s+([pad]\d+)\s*(.*)$/i.exec(line);
-    if (m) { out.push({ cmd: 'reject', id: m[1].toLowerCase(), reason: m[2].trim() }); continue; }
+    let m = /^\s*\/(?:r|reject)\s+((?:[pad]\d+[\s,]*)+)(.*)$/i.exec(line);
+    if (m) {
+      for (const id of m[1].toLowerCase().split(/[\s,]+/).filter(Boolean)) out.push({ cmd: 'reject', id, reason: m[2].trim() });
+      continue;
+    }
     m = /^\s*\/(retry|take)\s+#?(\d+)\s*$/i.exec(line);
     if (m) out.push({ cmd: m[1].toLowerCase() as 'retry' | 'take', number: Number(m[2]) });
   }
   return out;
 }
-
 // Text from agents, issues and PRs is untrusted: it must not be able to write a marker the parser would read.
 const safe = (s: string) => s.replace(/<!--/g, '<!- -');
 const esc = (s: string) => safe(s).replace(/\r?\n/g, ' ').trim();
@@ -58,6 +69,44 @@ export interface DashboardInfo {
   now?: number;
 }
 
+/** A decision waiting for the maintainer: one line, its details, and whether 🚀 means something. */
+export interface PendingItem { id: string; line: string; detail: string; rocket: string | null }
+
+/** Every pending decision of a repo, in dashboard order. Pure. */
+export function pendingItems(db: Db, repo: string): PendingItem[] {
+  const iss = (n: number) => `[#${n}](https://github.com/${repo}/issues/${n})`;
+  const pr = (n: number) => `[#${n}](https://github.com/${repo}/pull/${n})`;
+  const out: PendingItem[] = [];
+  for (const p of db.proposals('pending', repo)) {
+    const tracked = p.covers_issue ? ` (tracked: ${iss(p.covers_issue)})` : p.covers_rm ? ` (${p.covers_rm})` : '';
+    out.push({ id: `p${p.id}`, line: `**p${p.id}** new issue: ${esc(p.title)}${tracked}`,
+      detail: details('details', `${p.rationale ? `${p.rationale}\n\n` : ''}${p.body}`), rocket: null });
+  }
+  for (const a of db.pendingActions()) {
+    const i = db.issue(a.issue_id);
+    if (i.repo !== repo) continue;
+    const n = db.prForIssue(i.id)?.number ?? 0;
+    const reply = replyText(a.message);
+    const what = a.kind === 'rebase' ? 'rebase' : a.kind === 'fix' ? (reply ? 'fix + reply' : 'fix') : 'reply';
+    const parts = [reply ? quote(reply) : '', a.patch ? `\`\`\`diff\n${a.patch.slice(0, 6000)}${a.patch.length > 6000 ? '\n…' : ''}\n\`\`\`` : ''].filter(Boolean);
+    out.push({ id: `a${a.id}`, line: `**a${a.id}** ${what} on ${pr(n)}`,
+      detail: parts.length ? details(a.patch ? `diff, ${diffLines(a.patch)} lines` : 'reply', parts.join('\n\n')) : '', rocket: null });
+  }
+  for (const d of db.drafts('pending').filter((d) => d.repo === repo)) {
+    out.push({ id: `d${d.id}`, line: `**d${d.id}** ${d.target === 'pr' ? 'review' : 'reply'} ${d.target === 'pr' ? pr(d.number) : iss(d.number)} @${d.author}`,
+      detail: details(esc(d.recommendation.split('\n')[0]).slice(0, 100), quote(d.message)),
+      rocket: d.target === 'pr' ? 'post as "request changes"' : d.take ? 'also assign it to you so it gets implemented' : null });
+  }
+  return out;
+}
+
+/** The comment that stands for one pending item: react on it to decide. */
+export function itemComment(it: PendingItem): string {
+  const keys = `👍 approve · 👎 reject${it.rocket ? ` · 🚀 approve and ${it.rocket}` : ''}`;
+  return `${itemMark(it.id)}\n${it.line}\n\n${keys}\n${it.detail}`;
+}
+export const itemMark = (id: string) => `<!-- maintainer-bot:item ${id} -->`;
+
 /** The dashboard body for one repo. Pure: reads the state only. One line per item; long text folded. */
 export function renderDashboard(db: Db, cfg: Config, info: DashboardInfo): string {
   void cfg;
@@ -65,7 +114,6 @@ export function renderDashboard(db: Db, cfg: Config, info: DashboardInfo): strin
   const repo = info.repo;
   const iss = (n: number) => `[#${n}](https://github.com/${repo}/issues/${n})`;
   const pr = (n: number) => `[#${n}](https://github.com/${repo}/pull/${n})`;
-  const cmd = (id: string) => `\`/approve ${id}\``;
   const cost = `$${(info.monthCostUsd ?? 0).toFixed(2)}${info.monthLimitUsd ? `/$${info.monthLimitUsd.toFixed(0)}` : ''}`;
   const L: string[] = [
     DASHBOARD_MARK, repoMark(repo), '',
@@ -78,33 +126,13 @@ export function renderDashboard(db: Db, cfg: Config, info: DashboardInfo): strin
     if (days <= 21) L.push(`> ⚠️ MAINTAINER_TOKEN ${days <= 0 ? 'has expired' : `expires in ${days} days`}`, '');
   }
 
-  const todo: string[] = [];
-  for (const p of db.proposals('pending', repo)) {
-    const tracked = p.covers_issue ? ` (tracked: ${iss(p.covers_issue)})` : p.covers_rm ? ` (${p.covers_rm})` : '';
-    todo.push(`- **p${p.id}** new issue: ${esc(p.title)}${tracked} → ${cmd(`p${p.id}`)}`);
-    todo.push(details('details', `${p.rationale ? `${p.rationale}\n\n` : ''}${p.body}`));
-  }
-  for (const a of db.pendingActions()) {
-    const i = db.issue(a.issue_id);
-    if (i.repo !== repo) continue;
-    const n = db.prForIssue(i.id)?.number ?? 0;
-    const reply = replyText(a.message);
-    const what = a.kind === 'rebase' ? 'rebase' : a.kind === 'fix' ? (reply ? 'fix + reply' : 'fix') : 'reply';
-    todo.push(`- **a${a.id}** ${what} on ${pr(n)} → ${cmd(`a${a.id}`)}`);
-    const parts = [reply ? quote(reply) : '', a.patch ? `\`\`\`diff\n${a.patch.slice(0, 6000)}${a.patch.length > 6000 ? '\n…' : ''}\n\`\`\`` : ''].filter(Boolean);
-    if (parts.length) todo.push(details(a.patch ? `diff, ${diffLines(a.patch)} lines` : 'reply', parts.join('\n\n')));
-  }
-  for (const d of db.drafts('pending').filter((d) => d.repo === repo)) {
-    const flag = d.target === 'pr' ? ' · `--changes` to request changes' : d.take ? ' · `--take` to also assign it' : '';
-    todo.push(`- **d${d.id}** ${d.target === 'pr' ? 'review' : 'reply'} ${d.target === 'pr' ? pr(d.number) : iss(d.number)} @${d.author} → ${cmd(`d${d.id}`)}${flag}`);
-    todo.push(details(esc(d.recommendation.split('\n')[0]).slice(0, 100), quote(d.message)));
-  }
+  const todo: string[] = pendingItems(db, repo).map((it) => `- ${it.line}`);
   for (const i of db.issuesInState('skipped').filter((i) => i.repo === repo && db.get(`handed-back:${i.id}`) && !i.skip_reason?.startsWith('rejected by human'))) {
     todo.push(`- ${iss(i.number)} stopped: ${esc((i.skip_reason ?? '').slice(0, 140))} → \`/retry #${i.number}\``);
   }
   const blocked = db.blockedIssues(repo);
   if (blocked.length) todo.push(`- gate broken on base: ${esc(blocked[0].blocked!)}`);
-  L.push('### To decide', '', ...(todo.length ? todo : ['_Nothing._']), '');
+  L.push('### To decide', '', ...(todo.length ? ['React on the comments below: 👍 approve · 👎 reject · 🚀 approve with the variant shown.', '', ...todo] : ['_Nothing._']), '');
 
   const prs = db.openPrsWithIssue().filter((p) => p.repo === repo);
   if (prs.length) {
@@ -130,7 +158,7 @@ export function renderDashboard(db: Db, cfg: Config, info: DashboardInfo): strin
     for (const s of src) L.push(`- **${s.name}**: ${esc(s.digest!.split('\n')[0])}`);
     L.push('');
   }
-  L.push('---', '`/approve <id>` · `/reject <id> why` · `/retry #N` · `/take N` · `/pause` · `/resume`');
+  L.push('---', '`/a p3 p4` · `/a all` · `/r p5 why` · `/retry #N` · `/take N` · `/pause` · `/resume`');
   return L.join('\n');
 }
 

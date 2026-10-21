@@ -64,6 +64,13 @@ describe('Db', () => {
     expect(back.allIssues().length).toBe(3);
   });
 
+  it('lists flag keys by prefix, treating % and _ literally', () => {
+    const db = setup();
+    db.set('item:d/k:o/r:p1', '11'); db.set('item:d/k:o/r:a2', '12'); db.set('item:d/k:o/rx:p1', '13'); db.set('item_x', '1');
+    expect(db.allKeys('item:d/k:o/r:')).toEqual(['item:d/k:o/r:a2', 'item:d/k:o/r:p1']);
+    expect(db.allKeys('item_')).toEqual(['item_x']);
+  });
+
   it('sums cost per run and window', () => {
     const db = setup();
     const call = { issueId: null, agent: 'triage', durationMs: 1, inputTokens: 1, outputTokens: 1, ok: true, resultJson: '{}' };

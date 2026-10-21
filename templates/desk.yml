@@ -11,7 +11,10 @@ permissions: {}
 
 jobs:
   relay:
-    if: github.event.comment.user.login == github.repository_owner && contains(github.event.issue.body, 'maintainer-bot:repo ')
+    # Not for the comments the run itself posts (item cards, replies): those would only start another run.
+    if: >-
+      github.event.comment.user.login == github.repository_owner && contains(github.event.issue.body, 'maintainer-bot:repo ')
+      && !contains(github.event.comment.body, '<!-- maintainer-bot:')
     runs-on: ubuntu-latest
     steps:
       - env:

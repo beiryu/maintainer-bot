@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { DASHBOARD_MARK, dashboardChanged, parseCommands, renderDashboard } from '../src/dashboard.js';
+import { DASHBOARD_MARK, dashboardChanged, itemComment, parseCommands, pendingItems, renderDashboard } from '../src/dashboard.js';
 import { Db } from '../src/db.js';
 
 const cfg = { repos: [{ full_name: 'o/r', sources: [] }], limits: { max_in_flight_per_repo: 1 }, budget: { max_cost_per_call_usd: 3 } } as never;
@@ -26,13 +26,22 @@ describe('renderDashboard', () => {
     const body = renderDashboard(db, cfg, { repo: 'o/r', monthCostUsd: 1.25, monthLimitUsd: 50, now: Date.parse('2026-10-21T10:00:00Z') });
     expect(body.startsWith(`${DASHBOARD_MARK}\n<!-- maintainer-bot:repo o/r -->`)).toBe(true);
     expect(body).toContain('_Updated 2026-10-21 10:00 UTC · $1.25/$50 this month_');
-    expect(body).toContain(`- **p${p}** new issue: core: negative amounts unhandled (RM-013) → \`/approve p${p}\``);
-    expect(body).toContain('  **Problem**\n  Body <!- - evil -->'); // headings demoted, indented into the item; no marker smuggled
-    expect(body).toContain(`- **a${a}** fix + reply on [#20](https://github.com/o/r/pull/20) → \`/approve a${a}\``);
-    expect(body).toContain('> Fixed the null case.');
-    expect(body).not.toContain('for you only');
-    expect(body).toContain(`- **d${d1}** reply [#31](https://github.com/o/r/issues/31) @someone → \`/approve d${d1}\` · \`--take\` to also assign it`);
-    expect(body).toContain(`- **d${d2}** review [#32](https://github.com/o/r/pull/32) @other → \`/approve d${d2}\` · \`--changes\` to request changes`);
+    expect(body).toContain(`- **p${p}** new issue: core: negative amounts unhandled (RM-013)`);
+
+    expect(body).toContain(`- **a${a}** fix + reply on [#20](https://github.com/o/r/pull/20)`);
+    expect(body).toContain(`- **d${d1}** reply [#31](https://github.com/o/r/issues/31) @someone`);
+    expect(body).toContain(`- **d${d2}** review [#32](https://github.com/o/r/pull/32) @other`);
+    expect(body).toContain('React on the comments below');
+    const items = pendingItems(db, 'o/r');
+    expect(items.map((i) => i.id)).toEqual([`p${p}`, `a${a}`, `d${d1}`, `d${d2}`]);
+    const card = (id: string) => itemComment(items.find((i) => i.id === id)!);
+    expect(card(`p${p}`)).toContain('  **Problem**\n  Body <!- - evil -->');
+    expect(card(`p${p}`)).toContain('👍 approve · 👎 reject\n');
+    expect(card(`a${a}`)).toContain('> Fixed the null case.');
+    expect(card(`a${a}`)).not.toContain('for you only');
+    expect(card(`d${d1}`)).toContain('🚀 approve and also assign it to you');
+    expect(card(`d${d2}`)).toContain('🚀 approve and post as "request changes"');
+    expect(parseCommands(items.map(itemComment).join('\n'))).toEqual([]);
     expect(body).toContain('- [#20](https://github.com/o/r/pull/20) ❌ fix(x): thing · changes requested');
     expect(body).toContain('- [#2](https://github.com/o/r/issues/2) issue 2 · coded');
     expect(body).toContain('- [#3](https://github.com/o/r/issues/3) stopped: coder gave up: needs a decision → `/retry #3`');
@@ -66,6 +75,12 @@ describe('parseCommands', () => {
       { cmd: 'take', number: 12 },
     ]);
     expect(parseCommands('/reject A3')).toEqual([{ cmd: 'reject', id: 'a3', reason: '' }]);
+    expect(parseCommands('/a p3 p4, a1\n/a all\n/A d2 --take\n/r p5 p6 not now')).toEqual([
+      { cmd: 'approve', id: 'p3' }, { cmd: 'approve', id: 'p4' }, { cmd: 'approve', id: 'a1' },
+      { cmd: 'approve', id: 'all' },
+      { cmd: 'approve', id: 'd2', flag: 'take' },
+      { cmd: 'reject', id: 'p5', reason: 'not now' }, { cmd: 'reject', id: 'p6', reason: 'not now' },
+    ]);
     expect(parseCommands('/approve a1\n/approve d2 --take\n/approve D3 --request-changes\n/approve p4 --bogus')).toEqual([
       { cmd: 'approve', id: 'a1' },
       { cmd: 'approve', id: 'd2', flag: 'take' },

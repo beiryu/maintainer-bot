@@ -158,6 +158,19 @@ export async function linkedOpenPrCount(repo: string, number: number): Promise<n
   return closing + refs;
 }
 
+/** Posts a comment and returns its id. */
+export async function addComment(repo: string, number: number, body: string): Promise<number> {
+  const r = JSON.parse(await gh(['api', '-X', 'POST', `repos/${repo}/issues/${number}/comments`, '--input', '-'], JSON.stringify({ body }), false));
+  return r.id as number;
+}
+export async function editComment(repo: string, id: number, body: string) {
+  await gh(['api', '-X', 'PATCH', `repos/${repo}/issues/comments/${id}`, '--input', '-'], JSON.stringify({ body }), false);
+}
+/** Reactions on a comment: who reacted with what (+1, -1, rocket, ...). */
+export async function commentReactions(repo: string, id: number): Promise<{ content: string; user: string }[]> {
+  const pages = await ghJson<any[]>(['api', '--paginate', '--slurp', `repos/${repo}/issues/comments/${id}/reactions`]);
+  return pages.flat().map((r) => ({ content: r.content, user: r.user?.login ?? '' }));
+}
 export async function commentOnIssue(repo: string, number: number, body: string) {
   await gh(['issue', 'comment', String(number), '-R', repo, '--body-file', '-'], body, false);
 }

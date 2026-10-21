@@ -19,7 +19,8 @@ on:
   check_suite:
     types: [completed]                       # CI failed on a bot PR → a fix is drafted
   schedule:
-    - cron: '0 2 * * 1'                      # weekly: upstream sources + audit
+    - cron: '0 2 * * *'                      # daily 09:00 Vietnam: upstream sources + audit
+    - cron: '*/15 * * * *'                   # read 👍/👎 reactions on the dashboard (reactions start no run)
   workflow_dispatch:
 
 # The most GITHUB_TOKEN may do in the called workflow: its agent job reads with these, its

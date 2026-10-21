@@ -44,8 +44,10 @@ jobs:
     # Every run is a full pass (the event only decides when): the group's concurrency lets a
     # later event replace a queued one, and a pass that skipped the agent would lose that work.
     # Not for edits of ordinary issues; a CI run only when it failed.
+    # The frequent schedule only reads dashboard reactions; that needs no agent.
     if: >-
-      github.event_name != 'check_suite' || github.event.check_suite.conclusion == 'failure'
+      (github.event_name != 'check_suite' || github.event.check_suite.conclusion == 'failure')
+      && !(github.event_name == 'schedule' && github.event.schedule != '0 2 * * *')
     runs-on: ubuntu-latest
     timeout-minutes: 120
     permissions:
