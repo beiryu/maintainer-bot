@@ -25,7 +25,8 @@ describe('renderDashboard', () => {
     const { db, a, p, d1, d2 } = populated();
     const body = renderDashboard(db, cfg, { repo: 'o/r', monthCostUsd: 1.25, monthLimitUsd: 50, now: Date.parse('2026-10-21T10:00:00Z') });
     expect(body.startsWith(DASHBOARD_MARK)).toBe(true);
-    expect(body).toContain(`- [ ] **p${p}** · [gap] core: negative amounts unhandled _(đã có: RM-013)_`);
+    expect(body).toContain(`- [ ] **p${p}** \`gap\` core: negative amounts unhandled <!-- mb:p${p} -->`);
+    expect(body).toContain('already tracked as RM-013');
     expect(body).toContain(`<!-- mb:p${p} -->`);
     expect(body).toContain('Body <!- - evil -->'); // untrusted text cannot smuggle a marker
     expect(body).toContain(`<!-- mb:a${a} -->`);
@@ -35,19 +36,19 @@ describe('renderDashboard', () => {
     expect(body).toContain(`<!-- mb:d${d1}:take -->`);
     expect(body).toContain(`<!-- mb:d${d2}:changes -->`);
     expect(body).not.toContain(`<!-- mb:d${d2}:take -->`);
-    expect(body).toContain('[PR #20](https://github.com/o/r/pull/20) "fix(x): thing" · CI ❌ · changes requested');
-    expect(body).toContain('[#2](https://github.com/o/r/issues/2) "issue 2" · coded, lần 1');
-    expect(body).toContain('[#3](https://github.com/o/r/issues/3) "issue 3": coder gave up: needs a decision');
-    expect(body).toContain('Chi phí tháng này: $1.25 / 50');
-    expect(body).toContain('Cập nhật 2026-10-21 10:00 UTC');
+    expect(body).toContain('[PR #20](https://github.com/o/r/pull/20) "fix(x): thing" · CI failed · changes requested');
+    expect(body).toContain('[#2](https://github.com/o/r/issues/2) "issue 2" · coded, attempt 1');
+    expect(body).toContain('[#3](https://github.com/o/r/issues/3) "issue 3"\n  coder gave up: needs a decision');
+    expect(body).toContain('spent this month: $1.25 of $50');
+    expect(body).toContain('Updated 2026-10-21 10:00 UTC');
     // Everything the bot wrote renders unticked; only a person ticks.
     expect(parseTicks(body)).toEqual([]);
   });
   it('says so when nothing waits, and warns about an expiring token', () => {
     const db = new Db(':memory:');
     const body = renderDashboard(db, cfg, { repo: 'o/r', tokenExpiry: '2026-10-30', now: Date.parse('2026-10-21T00:00:00Z') });
-    expect(body).toContain('_(không có gì)_');
-    expect(body).toContain('BOT_PAT hết hạn sau 9 ngày');
+    expect(body).toContain('_Nothing waiting._');
+    expect(body).toContain('BOT_PAT expires in 9 days');
   });
   it('ignores the timestamp when deciding whether to re-post', () => {
     const db = new Db(':memory:');
@@ -55,8 +56,8 @@ describe('renderDashboard', () => {
     const b = renderDashboard(db, cfg, { repo: 'o/r', now: Date.parse('2026-10-22T10:00:00Z') });
     expect(dashboardChanged(a, b)).toBe(false);
     expect(dashboardChanged(a, `${a}\n- new`)).toBe(true);
-    expect(dashboardChanged('- [ ] **p1** · x · 2 phút trước', '- [ ] **p1** · x · 3 phút trước')).toBe(false);
-    expect(dashboardChanged('- [ ] **p1** · x · 2 phút trước', '- [ ] **p2** · x · 2 phút trước')).toBe(true);
+    expect(dashboardChanged('- [ ] **p1** x · proposed 2 min ago', '- [ ] **p1** x · proposed 3 min ago')).toBe(false);
+    expect(dashboardChanged('- [ ] **p1** x · proposed 2 min ago', '- [ ] **p2** x · proposed 2 min ago')).toBe(true);
   });
 });
 

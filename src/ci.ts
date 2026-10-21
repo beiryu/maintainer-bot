@@ -219,7 +219,7 @@ export async function ciPublish(ctx: Ctx, opts: PublishOpts): Promise<string[]> 
   }
 
   // 3. The dashboard.
-  if (db.get('budget-exhausted')) notes.push(`⏸ Hết ngân sách tháng này ($${cfg.budget.max_cost_per_month_usd}); bot nghỉ đến tháng sau.`);
+  if (db.get('budget-exhausted')) notes.push(`⏸ This month's budget ($${cfg.budget.max_cost_per_month_usd}) is spent; no agent runs until next month.`);
   const body = renderDashboard(db, cfg, {
     repo, runUrl: opts.runUrl, notes, monthCostUsd: db.costSince(monthStart()),
     monthLimitUsd: cfg.budget.max_cost_per_month_usd || undefined, tokenExpiry: await gh.tokenExpiry(),
