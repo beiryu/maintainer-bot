@@ -102,8 +102,9 @@ export function pendingItems(db: Db, repo: string): PendingItem[] {
 
 /** The comment that stands for one pending item: react on it to decide. */
 export function itemComment(it: PendingItem): string {
-  const keys = `👍 approve · 👎 reject${it.rocket ? ` · 🚀 approve and ${it.rocket}` : ''}`;
-  return `${itemMark(it.id)}\n${it.line}\n\n${keys}\n${it.detail}`;
+  const keys = `👍 approve · 👎 reject${it.rocket ? ` · 🚀 approve and ${it.rocket}` : ''} · or copy:`;
+  // A fenced block gets GitHub's copy button: one tap, then paste as a comment.
+  return `${itemMark(it.id)}\n${it.line}\n\n${keys}\n\n\`\`\`\n/a ${it.id}\n\`\`\`\n${it.detail}`;
 }
 export const itemMark = (id: string) => `<!-- maintainer-bot:item ${id} -->`;
 

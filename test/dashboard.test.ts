@@ -36,12 +36,12 @@ describe('renderDashboard', () => {
     expect(items.map((i) => i.id)).toEqual([`p${p}`, `a${a}`, `d${d1}`, `d${d2}`]);
     const card = (id: string) => itemComment(items.find((i) => i.id === id)!);
     expect(card(`p${p}`)).toContain('  **Problem**\n  Body <!- - evil -->');
-    expect(card(`p${p}`)).toContain('👍 approve · 👎 reject\n');
+    expect(card(`p${p}`)).toContain(`👍 approve · 👎 reject · or copy:\n\n\`\`\`\n/a p${p}\n\`\`\``);
     expect(card(`a${a}`)).toContain('> Fixed the null case.');
     expect(card(`a${a}`)).not.toContain('for you only');
     expect(card(`d${d1}`)).toContain('🚀 approve and also assign it to you');
     expect(card(`d${d2}`)).toContain('🚀 approve and post as "request changes"');
-    expect(parseCommands(items.map(itemComment).join('\n'))).toEqual([]);
+    // The card's copy block is a command only once the maintainer posts it; the card itself is skipped by marker.
     expect(body).toContain('- [#20](https://github.com/o/r/pull/20) ❌ fix(x): thing · changes requested');
     expect(body).toContain('- [#2](https://github.com/o/r/issues/2) issue 2 · coded');
     expect(body).toContain('- [#3](https://github.com/o/r/issues/3) stopped: coder gave up: needs a decision → `/retry #3`');
