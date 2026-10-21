@@ -60,6 +60,10 @@ const RepoConfig = z.object({
   // Files the auditor gets in full (rules, docs, API surface) besides the roadmap; relative to the repo.
   audit_files: z.array(z.string()).default(['README.md', 'CONTRIBUTING.md', 'AGENTS.md']),
   sources: z.array(Source).default([]),
+  // none: the change may not touch dependencies. existing: it may add a dependency the repo
+  // already uses somewhere (any package.json), or one listed in allowed_dependencies.
+  dependencies: z.enum(['none', 'existing']).default('none'),
+  allowed_dependencies: z.array(z.string()).default([]),
   // Packages the project publishes, for the traction numbers the auditor weighs (npm names).
   packages: z.array(z.string()).default([]),
   // Proposals an agent can implement become issues assigned to the maintainer right away;

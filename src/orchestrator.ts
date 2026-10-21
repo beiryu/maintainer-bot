@@ -9,7 +9,7 @@ import { type Config, repoConfig, type RepoConfig, repoOwner } from './config.js
 import type { Db, Issue, PendingAction, Pr, Proposal } from './db.js';
 import { housekeeping } from './housekeeping.js';
 import { cmd, needsYou } from './inbox.js';
-import { runGate, hashTestFiles, focusedTestCommand, repairPathVars, staticChecks } from './gate.js';
+import { checkDependencies, runGate, hashTestFiles, focusedTestCommand, repairPathVars, staticChecks } from './gate.js';
 import {
   agentDir, AGENT_META, applyPatch, ensureMirror, freshClone, git, issueDir, mirrorDir, parsePatch,
   prepareAgentWorkdir, readAgentFile,
@@ -361,6 +361,11 @@ function issueVars(rc: RepoConfig, issue: Issue): Record<string, string> {
     triage_reason: issue.triage_reason ?? '',
     repo_notes: rc.notes.trim() ? `Project-specific conventions you must follow:\n${rc.notes.trim()}` : '',
     forbidden_paths: rc.forbidden_paths.length ? rc.forbidden_paths.join(', ') : '(none)',
+    dependency_rule: rc.dependencies === 'existing'
+      ? 'You may add a dependency to a package only if the repository already uses it in another package.json'
+        + (rc.allowed_dependencies.length ? ` or it is one of: ${rc.allowed_dependencies.join(', ')}` : '')
+        + '. Add it with the package manager (it updates the lockfile too), never by editing the lockfile.'
+      : 'Do not add, remove or change dependencies.',
   };
 }
 
@@ -577,7 +582,9 @@ async function writePr(ctx: Ctx, rc: RepoConfig, issue: Issue) {
   const body = rc.agent_disclosure
     ? `${r.body.trim()}\n\nAI disclosure: this change was drafted with ${tool}.\n`
     : `${r.body.trim()}\n`;
-  ctx.db.update(issue.id, { pr_title: r.title.trim(), pr_body: body });
+  const deps = rc.dependencies === 'none' ? [] : (await checkDependencies(rc, dir, issue.base_sha!)).added;
+  const withDeps = deps.length ? `**Dependencies added:** ${deps.map((d) => `\`${d}\``).join(', ')}\n\n${body}` : body;
+  ctx.db.update(issue.id, { pr_title: r.title.trim(), pr_body: withDeps });
 }
 
 function prRules(rc: RepoConfig): string {

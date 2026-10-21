@@ -16,8 +16,8 @@ Read the project's rules first: AGENTS.md, then .agents/coding-conventions.md an
 
 Rules:
 - Make the smallest change that does what the issue asks (for a bug: fix the root cause).
-- Do not reformat, rename or refactor unrelated code. Do not touch build files, CI
-  config or dependencies.
+- Do not reformat, rename or refactor unrelated code. Do not touch build files or CI config.
+- {{dependency_rule}}
   Paths the gate rejects outright: {{forbidden_paths}}. If the issue cannot be resolved
   without them, stop and say so (done=false) instead of working around it.
 - If the issue is an open design question the maintainer has not settled (it lists options

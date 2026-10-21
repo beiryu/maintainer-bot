@@ -101,3 +101,35 @@ describe('sandbox modes', () => {
     expect(outPath(runner, 'data/o')).toMatch(/^\/.*\/data\/o$/);
   });
 });
+
+describe('dependency rule', () => {
+  it('lists what a patch adds per package.json, and checks it against the rest of the repo', async () => {
+    const { addedDependencies, checkDependencies } = await import('../src/gate.js');
+    expect(addedDependencies(
+      { 'a/package.json': { dependencies: { x: '1' } } },
+      { 'a/package.json': { dependencies: { x: '1', y: '^2' }, devDependencies: { z: '3' } }, 'b/package.json': { dependencies: { x: '1' } } },
+    )).toEqual([
+      { file: 'a/package.json', name: 'y', version: '^2' },
+      { file: 'a/package.json', name: 'z', version: '3' },
+      { file: 'b/package.json', name: 'x', version: '1' },
+    ]);
+    const { execaSync } = await import('execa');
+    const { mkdtempSync, writeFileSync, mkdirSync: mk } = await import('node:fs');
+    const { tmpdir } = await import('node:os');
+    const { join } = await import('node:path');
+    const dir = mkdtempSync(join(tmpdir(), 'deps-'));
+    const run = (args: string[]) => execaSync('git', ['-c', 'user.name=t', '-c', 'user.email=t@x', '-c', 'commit.gpgsign=false', ...args], { cwd: dir });
+    run(['init', '-q', '-b', 'main']);
+    mk(join(dir, 'cli')); mk(join(dir, 'mcp'));
+    writeFileSync(join(dir, 'cli/package.json'), JSON.stringify({ dependencies: { jsqr: '^1.4.0' } }));
+    writeFileSync(join(dir, 'mcp/package.json'), JSON.stringify({ dependencies: {} }));
+    run(['add', '-A']); run(['commit', '-qm', 'base']);
+    const base = run(['rev-parse', 'HEAD']).stdout.trim();
+    writeFileSync(join(dir, 'mcp/package.json'), JSON.stringify({ dependencies: { jsqr: '^1.4.0', leftpad: '1' } }));
+    const rc = (dependencies: 'none' | 'existing', allowed: string[] = []) => ({ dependencies, allowed_dependencies: allowed }) as never;
+    expect((await checkDependencies(rc('none'), dir, base)).fail).toMatch(/does not allow/);
+    expect((await checkDependencies(rc('existing'), dir, base)).fail).toMatch(/does not use anywhere yet: leftpad/);
+    const ok = await checkDependencies(rc('existing', ['leftpad']), dir, base);
+    expect(ok).toEqual({ fail: null, added: ['jsqr@^1.4.0 (mcp/package.json)', 'leftpad@1 (mcp/package.json)'] });
+  });
+});

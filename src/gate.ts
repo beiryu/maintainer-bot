@@ -116,6 +116,49 @@ export function focusedTestCommand(repo: RepoConfig, issue: Issue): string {
   return cmd;
 }
 
+const DEP_FIELDS = ['dependencies', 'devDependencies', 'peerDependencies', 'optionalDependencies'] as const;
+type Manifest = Partial<Record<(typeof DEP_FIELDS)[number], Record<string, string>>>;
+const depNames = (m: Manifest) => new Set(DEP_FIELDS.flatMap((f) => Object.keys(m[f] ?? {})));
+
+/** Dependencies a patch adds, per package.json, from the manifests before and after. Pure. */
+export function addedDependencies(before: Record<string, Manifest>, after: Record<string, Manifest>): { file: string; name: string; version: string }[] {
+  const out: { file: string; name: string; version: string }[] = [];
+  for (const [file, m] of Object.entries(after)) {
+    const had = depNames(before[file] ?? {});
+    for (const f of DEP_FIELDS) {
+      for (const [name, version] of Object.entries(m[f] ?? {})) if (!had.has(name)) out.push({ file, name, version });
+    }
+  }
+  return out;
+}
+
+/** Every package.json in a checkout (outside node_modules), parsed. */
+async function manifests(dir: string, rev?: string): Promise<Record<string, Manifest>> {
+  const files = (await git(dir, rev ? ['ls-tree', '-r', '--name-only', rev] : ['ls-files'])).split('\n')
+    .filter((f) => f && !f.includes('node_modules/') && /(^|\/)package\.json$/.test(f));
+  const out: Record<string, Manifest> = {};
+  for (const f of files) {
+    try { out[f] = JSON.parse(rev ? await git(dir, ['show', `${rev}:${f}`]) : readFileSync(join(dir, f), 'utf8')); } catch { /* not there on this side */ }
+  }
+  return out;
+}
+
+/** The dependency rule of the repo, checked on the patched tree. Returns a failure or null, and the list for the PR body. */
+export async function checkDependencies(repo: RepoConfig, dir: string, base: string): Promise<{ fail: string | null; added: string[] }> {
+  const before = await manifests(dir, base);
+  const after = await manifests(dir);
+  const added = addedDependencies(before, after);
+  if (!added.length) return { fail: null, added: [] };
+  const lines = added.map((d) => `${d.name}@${d.version} (${d.file})`);
+  if (repo.dependencies === 'none') return { fail: `the change adds dependencies, which this repo does not allow: ${lines.join(', ')}`, added: lines };
+  const known = new Set([...Object.values(before).flatMap((m) => [...depNames(m)]), ...repo.allowed_dependencies]);
+  const unknown = added.filter((d) => !known.has(d.name));
+  if (unknown.length) {
+    return { fail: `adds dependencies the repo does not use anywhere yet: ${unknown.map((d) => d.name).join(', ')}. Use what the repo already has, or ask for it to be added to allowed_dependencies.`, added: lines };
+  }
+  return { fail: null, added: lines };
+}
+
 export async function runGate(cfg: Config, repo: RepoConfig, issue: Issue, patch: string,
   log: (msg: string) => void = () => {}, opts: { rebase?: boolean } = {}): Promise<GateResult> {
   const fixed = staticChecks(patch, repo);
@@ -134,6 +177,9 @@ export async function runGate(cfg: Config, repo: RepoConfig, issue: Issue, patch
     await freshClone(issue.repo, issue.base_sha!, fixDir);
     await applyPatch(fixDir, patch);
   }
+
+  const deps = await checkDependencies(repo, fixDir, issue.base_sha!);
+  if (deps.fail) return { ok: false, kind: 'code', reason: deps.fail };
 
   for (const check of repo.gate) {
     log(`gate: ${check}`);
