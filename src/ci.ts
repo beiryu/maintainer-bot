@@ -2,7 +2,7 @@ import { readFileSync } from 'node:fs';
 import { parse } from 'yaml';
 import { z } from 'zod';
 import { type Config, parseConfig, repoConfig, RepoConfigSchema, repoOwner } from './config.js';
-import { type Command, DASHBOARD_MARK, DASHBOARD_TITLE, dashboardChanged, parseCommands, renderDashboard } from './dashboard.js';
+import { type Command, DASHBOARD_MARK, dashboardChanged, dashboardTitle, parseCommands, renderDashboard, repoMark } from './dashboard.js';
 import type { Db, StateJson } from './db.js';
 import { ensureMirror } from './git.js';
 import * as gh from './github.js';
@@ -23,6 +23,8 @@ const RUNTIME_ENV = { copilot: 'COPILOT_GITHUB_TOKEN', claude: 'ANTHROPIC_API_KE
 
 const BotBlock = z.object({
   github_user: z.string().regex(/^[\w-]+$/).optional(),     // default: the repo's owner
+  // Where the dashboard issue lives: this repo (default), or a private repo only the maintainer sees.
+  dashboard_repo: z.string().regex(/^[\w.-]+\/[\w.-]+$/).optional(),
   runtime: z.enum(['copilot', 'claude']).default('copilot'),
   auth_env: z.enum(['COPILOT_GITHUB_TOKEN', 'ANTHROPIC_API_KEY', 'CLAUDE_CODE_OAUTH_TOKEN']).optional(),
   model: z.string().optional(),
@@ -54,6 +56,12 @@ export function ciConfig(file: string, repo: string): Config {
     },
     notify: {},
   });
+}
+
+/** The repo that holds this repo's dashboard. */
+export function deskRepo(file: string, repo: string): string {
+  const raw = (parse(readFileSync(file, 'utf8')) ?? {}) as { bot?: unknown };
+  return BotBlock.parse(raw.bot ?? {}).dashboard_repo ?? repo;
 }
 
 /** `name=value` lines for $GITHUB_OUTPUT: what the workflow must install before the bot runs. */
@@ -120,18 +128,20 @@ export async function ciAgent(ctx: Ctx, opts: { repo: string; dry: boolean }) {
 
 // ---------------------------------------------------------------- publish job
 
-export interface PublishOpts { repo: string; draft: boolean; runUrl?: string }
+export interface PublishOpts { repo: string; desk?: string; draft: boolean; runUrl?: string }
 
-/** The dashboard issue of a repo, found by the number on record or by its marker; null when there is none yet. */
-async function findDashboard(ctx: Ctx, repo: string): Promise<{ number: number; body: string } | null> {
+/** The dashboard issue of a repo in the desk repo, by the number on record or by its marks; null when there is none yet. */
+async function findDashboard(ctx: Ctx, repo: string, desk: string): Promise<{ number: number; body: string } | null> {
   const { db } = ctx;
-  const known = db.get(`dashboard:${repo}`);
+  const key = `dashboard:${desk}:${repo}`;
+  const known = db.get(key);
   if (known) {
-    const i = await gh.getIssue(repo, Number(known));
+    const i = await gh.getIssue(desk, Number(known));
     if (i.state === 'OPEN') return { number: i.number, body: i.body ?? '' };
   }
-  const found = (await gh.findIssuesByBody(repo, 'maintainer-bot:dashboard')).find((i) => i.body.includes(DASHBOARD_MARK));
-  if (found) { db.set(`dashboard:${repo}`, String(found.number)); return { number: found.number, body: found.body }; }
+  const found = (await gh.findIssuesByBody(desk, 'maintainer-bot:dashboard'))
+    .find((i) => i.body.includes(DASHBOARD_MARK) && (i.body.includes(repoMark(repo)) || (desk === repo && !i.body.includes('maintainer-bot:repo'))));
+  if (found) { db.set(key, String(found.number)); return { number: found.number, body: found.body }; }
   return null;
 }
 
@@ -175,13 +185,13 @@ export function shortError(e: unknown): string {
 }
 
 /** What the maintainer would write on an issue they had to put down: the reason, and how to resume. */
-export function stopComment(reason: string, number: number, dashboard: number): string {
+export function stopComment(reason: string, number: number, dashboard: string): string {
   const why = reason
     .replace(/^(coder gave up|error|triage: not feasible|Reviewer: no rework can fix this):\s*/i, '')
     .replace(/^Blocked:\s*/i, '')
     .replace(/\s+/g, ' ').trim().slice(0, 500);
   return `Pausing this one: ${why}${/[.!?]$/.test(why) ? '' : '.'}\n\n`
-    + `Once that's in place, \`/retry #${number}\`${dashboard ? ` on #${dashboard}` : ''} picks it up again.`;
+    + `Once that's in place, \`/retry #${number}\`${dashboard ? ` on ${dashboard}` : ''} picks it up again.`;
 }
 
 const label = (c: Command) => c.cmd === 'approve' || c.cmd === 'reject' ? `${c.cmd} ${c.id}${'flag' in c && c.flag ? ` --${c.flag}` : ''}` : `${c.cmd} #${c.number}`;
@@ -189,6 +199,7 @@ const label = (c: Command) => c.cmd === 'approve' || c.cmd === 'reject' ? `${c.c
 export async function ciPublish(ctx: Ctx, opts: PublishOpts): Promise<string[]> {
   const { cfg, db } = ctx;
   const { repo } = opts;
+  const desk = opts.desk ?? repo;
   const rc = repoConfig(cfg, repo);
   const me = (await gh.currentUser()).toLowerCase();
   const notes: string[] = [];
@@ -198,12 +209,12 @@ export async function ciPublish(ctx: Ctx, opts: PublishOpts): Promise<string[]> 
 
   // 1. Commands in the maintainer's comments on the dashboard, each handled once (by comment
   // id, whatever event started this run), each answered with what was done and the run log.
-  const dash = await findDashboard(ctx, repo);
+  const dash = await findDashboard(ctx, repo, desk);
   let decided = false;
   if (dash) {
-    const doneKey = `dashboard-last-comment:${repo}`;
+    const doneKey = `dashboard-last-comment:${desk}:${repo}`;
     const lastDone = Number(db.get(doneKey) ?? 0);
-    const comments = await gh.issueComments(repo, dash.number);
+    const comments = await gh.issueComments(desk, dash.number);
     // First run on this dashboard: earlier comments are history, not orders.
     const fresh = lastDone ? comments.filter((c) => c.id > lastDone && c.author.toLowerCase() === me && !c.body.includes(REPLY_MARK)) : [];
     for (const c of fresh) {
@@ -220,7 +231,7 @@ export async function ciPublish(ctx: Ctx, opts: PublishOpts): Promise<string[]> 
       if (resume) { db.set('paused', null); results.push('▶️ resumed'); }
       for (const r of results) log(r);
       const reply = `${REPLY_MARK}\n${results.join('\n')}${opts.runUrl ? ` · [log](${opts.runUrl})` : ''}`;
-      await gh.commentOnIssue(repo, dash.number, reply).catch((e) => log(`reply failed: ${(e as Error).message}`));
+      await gh.commentOnIssue(desk, dash.number, reply).catch((e) => log(`reply failed: ${(e as Error).message}`));
     }
     const newest = comments.at(-1)?.id ?? 0;
     db.set(doneKey, String(Math.max(lastDone, newest, 1)));
@@ -243,7 +254,9 @@ export async function ciPublish(ctx: Ctx, opts: PublishOpts): Promise<string[]> 
   for (const i of db.issuesInState('skipped').filter((i) => i.repo === repo && db.get(`handed-back:${i.id}`) && !db.get(`stop-noted:${i.id}`))) {
     if (i.skip_reason?.startsWith('rejected by human')) continue;
     try {
-      await gh.commentOnIssue(repo, i.number, stopComment(i.skip_reason ?? '', i.number, Number(db.get(`dashboard:${repo}`) ?? 0)));
+      // A private desk's issue would be a dead link for everyone else: name it only when it is public here.
+      const where = desk === repo ? (dash ? `#${dash.number}` : 'the dashboard') : 'the dashboard';
+      await gh.commentOnIssue(repo, i.number, stopComment(i.skip_reason ?? '', i.number, where));
       db.set(`stop-noted:${i.id}`, new Date().toISOString());
     } catch (e) { log(`#${i.number}: stop note not posted: ${(e as Error).message.split('\n')[0]}`); }
   }
@@ -255,12 +268,12 @@ export async function ciPublish(ctx: Ctx, opts: PublishOpts): Promise<string[]> 
     monthLimitUsd: cfg.budget.max_cost_per_month_usd || undefined, tokenExpiry: await gh.tokenExpiry(),
   });
   if (!dash) {
-    const created = await gh.createIssue(repo, { title: DASHBOARD_TITLE, body });
-    db.set(`dashboard:${repo}`, String(created.number));
-    await gh.pinIssue(repo, created.number).catch(() => undefined);
+    const created = await gh.createIssue(desk, { title: dashboardTitle(repo, desk), body });
+    db.set(`dashboard:${desk}:${repo}`, String(created.number));
+    await gh.pinIssue(desk, created.number).catch(() => undefined);
     log(`dashboard #${created.number} created`);
   } else if (decided || dashboardChanged(dash.body, body)) {
-    await gh.editIssueBody(repo, dash.number, body);
+    await gh.editIssueBody(desk, dash.number, body);
     log(`dashboard #${dash.number} updated`);
   }
   return notes;

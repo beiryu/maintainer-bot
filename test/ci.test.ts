@@ -2,7 +2,7 @@ import { mkdtempSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
-import { ciConfig, setupOutputs } from '../src/ci.js';
+import { ciConfig, deskRepo, setupOutputs } from '../src/ci.js';
 
 const file = (text: string) => {
   const f = join(mkdtempSync(join(tmpdir(), 'mbci-')), 'maintainer-bot.yml');
@@ -39,6 +39,13 @@ pr_scopes: [core]
   });
 });
 
+describe('deskRepo', () => {
+  it('is the repo itself unless the bot block names a private desk', () => {
+    expect(deskRepo(file('focused_test: x\n'), 'beiryu/vn-skills')).toBe('beiryu/vn-skills');
+    expect(deskRepo(file('bot: { dashboard_repo: beiryu/maintainer-desk }\nfocused_test: x\n'), 'beiryu/vn-skills')).toBe('beiryu/maintainer-desk');
+  });
+});
+
 describe('setupOutputs', () => {
   it('tells the workflow which toolchains to install', () => {
     const out = setupOutputs(file('bot: { setup: [pnpm@12.11.2, go@1.24, uv] }\nfocused_test: x\n'));
@@ -59,7 +66,7 @@ describe('shortError', () => {
 describe('stopComment', () => {
   it('states the reason plainly and how to resume, with nothing that says bot', async () => {
     const { stopComment } = await import('../src/ci.js');
-    const c = stopComment('coder gave up: Blocked: vn-pit needs a legal source that is not in the repo', 69, 59);
+    const c = stopComment('coder gave up: Blocked: vn-pit needs a legal source that is not in the repo', 69, '#59');
     expect(c).toBe('Pausing this one: vn-pit needs a legal source that is not in the repo.\n\nOnce that\'s in place, `/retry #69` on #59 picks it up again.');
     expect(c).not.toMatch(/bot|🤖/i);
   });

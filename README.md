@@ -70,6 +70,11 @@ The bot answers each comment with what it did (the commit, the issue, the PR) or
 not, and a link to the run log. The dashboard itself is written only by the bot; its edits do
 not start runs.
 
+Private dashboard: set `bot.dashboard_repo: you/desk` (a private repo) and the dashboard issue
+lives there instead, one issue per maintained repo. Add `BOT_PAT` access to the desk repo
+(Issues read/write), and copy [`templates/desk.yml`](templates/desk.yml) into the desk as
+`.github/workflows/relay.yml` with a `DISPATCH_TOKEN` secret, so a comment there starts the run.
+
 Costs: Actions minutes are free for public repositories. Model spend is capped per agent
 call (`max_cost_per_call_usd`) and per month (`max_cost_per_month_usd`); the dashboard shows
 this month's total. The dashboard also warns when `BOT_PAT` is about to expire.

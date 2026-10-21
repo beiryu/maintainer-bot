@@ -4,7 +4,7 @@ import { randomUUID } from 'node:crypto';
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { runAudit } from './audit.js';
-import { ciAgent, ciConfig, ciPublish, pullState, pushState, setupOutputs, STATE_BRANCH } from './ci.js';
+import { ciAgent, ciConfig, ciPublish, deskRepo, pullState, pushState, setupOutputs, STATE_BRANCH } from './ci.js';
 import { loadConfig, repoConfig } from './config.js';
 import { doctor } from './doctor.js';
 import { addRepo, listRepos, removeRepo } from './onboard.js';
@@ -305,7 +305,7 @@ ciOpts(ci.command('publish')).description('with the maintainer\'s token: run the
     const c = ciCtx(o, true);
     const previous = await pullState(o.repo);
     // --event/--event-name are accepted for the workflow's sake; decisions are read from the dashboard itself.
-    const notes = await ciPublish(c, { repo: o.repo, draft: !!o.draft, runUrl: o.runUrl });
+    const notes = await ciPublish(c, { repo: o.repo, desk: deskRepo(o.botConfig, o.repo), draft: !!o.draft, runUrl: o.runUrl });
     for (const n of notes) console.log(`note: ${n}`);
     const head = await pushState(o.repo, c.db.exportJson({ resultChars: 1500 }), previous);
     console.log(head ? `state saved on ${STATE_BRANCH} @ ${head.slice(0, 10)}` : 'state unchanged');

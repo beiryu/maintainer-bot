@@ -7,7 +7,9 @@ import { replyText } from './orchestrator.js';
 // and the rest, and the bot answers each comment with what it did and the run log.
 
 export const DASHBOARD_MARK = '<!-- maintainer-bot:dashboard -->';
-export const DASHBOARD_TITLE = 'Maintainer Dashboard';
+/** Marks whose dashboard an issue is, so one private desk repo can hold the dashboards of many repos. */
+export const repoMark = (repo: string) => `<!-- maintainer-bot:repo ${repo} -->`;
+export const dashboardTitle = (repo: string, desk: string) => (desk === repo ? 'Maintainer Dashboard' : repo);
 
 export type Command =
   | { cmd: 'approve'; id: string; flag?: 'take' | 'changes' }
@@ -66,7 +68,7 @@ export function renderDashboard(db: Db, cfg: Config, info: DashboardInfo): strin
   const cmd = (id: string) => `\`/approve ${id}\``;
   const cost = `$${(info.monthCostUsd ?? 0).toFixed(2)}${info.monthLimitUsd ? `/$${info.monthLimitUsd.toFixed(0)}` : ''}`;
   const L: string[] = [
-    DASHBOARD_MARK, '',
+    DASHBOARD_MARK, repoMark(repo), '',
     `_Updated ${new Date(now).toISOString().replace('T', ' ').slice(0, 16)} UTC${info.runUrl ? ` · [log](${info.runUrl})` : ''} · ${cost} this month_`, '',
   ];
   if (db.get('paused')) L.push('> ⏸ Paused — `/resume`', '');

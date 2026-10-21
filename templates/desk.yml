@@ -1,0 +1,22 @@
+# .github/workflows/relay.yml in the private desk repo that holds the dashboards.
+# A comment of yours on a dashboard issue starts maintainer-bot in the repo that issue is for.
+# Secret DISPATCH_TOKEN: fine-grained PAT, Actions read/write on the maintained repos.
+name: relay
+
+on:
+  issue_comment:
+    types: [created]
+
+permissions: {}
+
+jobs:
+  relay:
+    if: github.event.comment.user.login == github.repository_owner && contains(github.event.issue.body, 'maintainer-bot:repo ')
+    runs-on: ubuntu-latest
+    steps:
+      - env:
+          GH_TOKEN: ${{ secrets.DISPATCH_TOKEN }}
+          BODY: ${{ github.event.issue.body }}
+        run: |
+          repo=$(printf '%s' "$BODY" | sed -n 's/.*maintainer-bot:repo \([A-Za-z0-9_.-]*\/[A-Za-z0-9_.-]*\) -->.*/\1/p' | head -1)
+          gh workflow run maintainer.yml -R "$repo"

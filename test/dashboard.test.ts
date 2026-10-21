@@ -24,7 +24,7 @@ describe('renderDashboard', () => {
   it('lists every decision with the command that approves it, one line each, and the rest as status', () => {
     const { db, a, p, d1, d2 } = populated();
     const body = renderDashboard(db, cfg, { repo: 'o/r', monthCostUsd: 1.25, monthLimitUsd: 50, now: Date.parse('2026-10-21T10:00:00Z') });
-    expect(body.startsWith(DASHBOARD_MARK)).toBe(true);
+    expect(body.startsWith(`${DASHBOARD_MARK}\n<!-- maintainer-bot:repo o/r -->`)).toBe(true);
     expect(body).toContain('_Updated 2026-10-21 10:00 UTC · $1.25/$50 this month_');
     expect(body).toContain(`- **p${p}** new issue: core: negative amounts unhandled (RM-013) → \`/approve p${p}\``);
     expect(body).toContain('  **Problem**\n  Body <!- - evil -->'); // headings demoted, indented into the item; no marker smuggled
