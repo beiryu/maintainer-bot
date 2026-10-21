@@ -22,6 +22,15 @@ on:
     - cron: '0 2 * * 1'                      # weekly: upstream sources + audit
   workflow_dispatch:
 
+# The most GITHUB_TOKEN may do in the called workflow: its agent job reads with these, its
+# publish job uses the maintainer's PAT and asks for nothing.
+permissions:
+  contents: read
+  issues: read
+  pull-requests: read
+  checks: read
+  actions: read
+
 # One pass at a time; a second event waits instead of running alongside.
 concurrency:
   group: maintainer-bot
