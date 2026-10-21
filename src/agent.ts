@@ -67,7 +67,7 @@ export const AGENTS = {
         title: z.string().max(120),
         body: z.string(),
         labels: z.array(z.string()).default([]),
-        kind: z.enum(['bug', 'gap', 'docs', 'test', 'data', 'consistency', 'roadmap']).default('gap'),
+        kind: z.enum(['feature', 'growth', 'bug', 'gap', 'docs', 'test', 'data', 'consistency', 'roadmap']).catch('gap'),
         rationale: z.string().default(''),
         evidence: z.array(z.string()).default([]),
         // Set when an open issue or roadmap item already covers it: then it is shown, not filed twice.

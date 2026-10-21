@@ -237,6 +237,13 @@ export async function ciPublish(ctx: Ctx, opts: PublishOpts): Promise<string[]> 
     db.set(doneKey, String(Math.max(lastDone, newest, 1)));
   }
 
+  // 2a. Proposals the agent can implement, on a repo that does not want to approve each one.
+  for (const p of db.proposals('pending', repo).filter((p) => db.get(`auto-approve:${p.id}`))) {
+    try { log(`p${p.id}: ${await approveProposal(ctx, p.id, { edit: false })}`); }
+    catch (e) { notes.push(`❌ p${p.id}: ${shortError(e)}`); }
+    db.set(`auto-approve:${p.id}`, null);
+  }
+
   // 2. PRs the agent step got ready.
   for (const i of db.allIssues().filter((i) => i.repo === repo && i.state === 'reviewed' && !i.dry)) {
     try {

@@ -80,6 +80,7 @@ export async function gatherAuditContext(ctx: Ctx, rc: RepoConfig, sourceDigest:
     open_issues: untrusted(issues.map((i) => `#${i.number} [${i.labels.map((l) => l.name).join(', ')}] ${i.title}\n    ${(i.body ?? '').replace(/\s+/g, ' ').slice(0, 240)}`).join('\n')) || '(none)',
     open_prs: untrusted(prs.map((p) => `#${p.number} by @${p.author} [${p.labels.join(', ')}] ${p.title}`).join('\n')) || '(none)',
     recent_commits: untrusted(commits),
+    traction: untrusted(await gh.traction(rc.full_name, rc.packages)),
     source_digest: untrusted(sourceDigest) || '(no upstream changes detected, or no sources configured)',
     previous: untrusted(previous) || '(none)',
   };
@@ -106,7 +107,8 @@ export async function runAudit(ctx: Ctx, rc: RepoConfig, sourceDigest = '', log:
       rationale: p.rationale, evidence: JSON.stringify(p.evidence), covers_issue: p.covers_issue, covers_rm: p.covers_rm,
       run_id: ctx.runId,
     });
-    if (!p.agent_suitable) db.updateProposal(id, { rationale: `[needs a person] ${p.rationale}` });
+    if (!p.agent_suitable) db.updateProposal(id, { rationale: `[needs you] ${p.rationale}` });
+    else if (rc.auto_approve && !p.covers_issue) db.set(`auto-approve:${id}`, '1');
     added.push(db.proposal(id));
     known.add(norm(p.title));
   }

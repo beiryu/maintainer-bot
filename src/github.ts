@@ -403,6 +403,27 @@ export async function prCommentsSince(repo: string, number: number, since: strin
     .sort((a, b) => a.createdAt.localeCompare(b.createdAt));
 }
 
+/** What the auditor weighs product work against. Each part is optional: traffic needs push access. */
+export async function traction(repo: string, npmPackages: string[] = []): Promise<string> {
+  const out: string[] = [];
+  const tryJson = async <T>(args: string[]) => { try { return await ghJson<T>(args); } catch { return null; } };
+  const r = await tryJson<{ stargazers_count: number; forks_count: number; subscribers_count: number; open_issues_count: number }>(['api', `repos/${repo}`]);
+  if (r) out.push(`stars ${r.stargazers_count}, forks ${r.forks_count}, watchers ${r.subscribers_count}`);
+  const v = await tryJson<{ count: number; uniques: number }>(['api', `repos/${repo}/traffic/views`]);
+  if (v) out.push(`views in the last 14 days: ${v.count} (${v.uniques} unique visitors)`);
+  const c = await tryJson<{ count: number; uniques: number }>(['api', `repos/${repo}/traffic/clones`]);
+  if (c) out.push(`clones in the last 14 days: ${c.count} (${c.uniques} unique)`);
+  const refs = await tryJson<{ referrer: string; count: number }[]>(['api', `repos/${repo}/traffic/popular/referrers`]);
+  if (refs) out.push(`referrers: ${refs.map((x) => `${x.referrer} ${x.count}`).join(', ') || 'none'}`);
+  for (const pkg of npmPackages) {
+    try {
+      const res = await fetch(`https://api.npmjs.org/downloads/point/last-month/${pkg}`, { signal: AbortSignal.timeout(10_000) });
+      if (res.ok) out.push(`npm ${pkg}: ${(await res.json() as { downloads: number }).downloads} downloads last month (includes mirrors and bots)`);
+    } catch { /* optional */ }
+  }
+  return out.join('\n') || '(unavailable)';
+}
+
 // ---- onboarding (`repo add`)
 
 export async function repoInfo(repo: string) {

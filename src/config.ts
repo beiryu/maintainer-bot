@@ -60,6 +60,11 @@ const RepoConfig = z.object({
   // Files the auditor gets in full (rules, docs, API surface) besides the roadmap; relative to the repo.
   audit_files: z.array(z.string()).default(['README.md', 'CONTRIBUTING.md', 'AGENTS.md']),
   sources: z.array(Source).default([]),
+  // Packages the project publishes, for the traction numbers the auditor weighs (npm names).
+  packages: z.array(z.string()).default([]),
+  // Proposals an agent can implement become issues assigned to the maintainer right away;
+  // only the ones that need a person wait on the dashboard.
+  auto_approve: z.boolean().default(false),
 });
 
 const Config = z.object({
