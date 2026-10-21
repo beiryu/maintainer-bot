@@ -46,3 +46,12 @@ describe('setupOutputs', () => {
     expect(setupOutputs(file('focused_test: x\n'))).toBe('runtime=copilot\nauth_env=COPILOT_GITHUB_TOKEN\nnode=22\npnpm=\ngo=\nuv=');
   });
 });
+
+describe('shortError', () => {
+  it('turns a failed git command line into what failed and why', async () => {
+    const { shortError } = await import('../src/ci.js');
+    const e = Object.assign(new Error("Command failed with exit code 128: git -c 'core.hooksPath=/dev/null' checkout --quiet --detach 5a22"), { stderr: 'fatal: reference is not a tree: 5a22' });
+    expect(shortError(e)).toBe('git checkout failed (exit 128): fatal: reference is not a tree: 5a22');
+    expect(shortError(new Error('d3 is already done\nmore'))).toBe('d3 is already done');
+  });
+});

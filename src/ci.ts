@@ -165,6 +165,15 @@ async function applyCommand(ctx: Ctx, repo: string, c: Command): Promise<string>
   return `#${c.number} ${c.cmd === 'take' ? 'assigned to you; ' : ''}the bot works on it in the next run`;
 }
 
+/** One readable line for a failure: a git/gh command line is noise, its exit code and stderr are not. */
+export function shortError(e: unknown): string {
+  const msg = (e as Error).message ?? String(e);
+  const cmd = /^Command failed with exit code (\d+): (git|gh)\b.*?\b(checkout|fetch|push|apply|clone|commit|api|pr|issue)\b/.exec(msg);
+  const stderr = (e as { stderr?: string }).stderr?.trim().split('\n').pop();
+  if (cmd) return `${cmd[2]} ${cmd[3]} failed (exit ${cmd[1]})${stderr ? `: ${stderr.slice(0, 160)}` : ''}`;
+  return msg.split('\n')[0].slice(0, 200);
+}
+
 const label = (c: Command) => c.cmd === 'approve' || c.cmd === 'reject' ? `${c.cmd} ${c.id}${'flag' in c && c.flag ? ` --${c.flag}` : ''}` : `${c.cmd} #${c.number}`;
 
 export async function ciPublish(ctx: Ctx, opts: PublishOpts): Promise<string[]> {
@@ -194,13 +203,13 @@ export async function ciPublish(ctx: Ctx, opts: PublishOpts): Promise<string[]> 
       decided = true;
       const results: string[] = [];
       for (const cmd of cmds) {
-        try { results.push(`✅ \`${label(cmd)}\`: ${await applyCommand(ctx, repo, cmd)}`); }
-        catch (e) { results.push(`❌ \`${label(cmd)}\`: ${(e as Error).message.split('\n')[0].slice(0, 300)}`); }
+        try { results.push(`✅ ${label(cmd)}: ${await applyCommand(ctx, repo, cmd)}`); }
+        catch (e) { results.push(`❌ ${label(cmd)}: ${shortError(e)}`); }
       }
       if (pause) { db.set('paused', '1'); results.push('⏸ paused: no agent runs until `/resume`'); }
       if (resume) { db.set('paused', null); results.push('▶️ resumed'); }
       for (const r of results) log(r);
-      const reply = `${REPLY_MARK}\n> ${c.body.trim().split('\n')[0].slice(0, 200)}\n\n${results.join('\n')}${opts.runUrl ? `\n\n[Run log](${opts.runUrl})` : ''}`;
+      const reply = `${REPLY_MARK}\n🤖 ${results.join('\n🤖 ')}${opts.runUrl ? ` · [log](${opts.runUrl})` : ''}`;
       await gh.commentOnIssue(repo, dash.number, reply).catch((e) => log(`reply failed: ${(e as Error).message}`));
     }
     const newest = comments.at(-1)?.id ?? 0;

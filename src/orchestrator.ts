@@ -731,7 +731,7 @@ export async function approveProposal(ctx: Ctx, id: number, opts: { edit: boolea
   // The maintainer just approved it: no triage, straight into the pipeline.
   db.transition(issue.id, 'claimed', { score: 1, triage_reason: p.rationale });
   db.updateProposal(id, { status: 'filed', title, body, issue_number: created.number, issue_id: issue.id });
-  return `Opened ${created.url}${labels.length ? ` [${labels.join(', ')}]` : ''}; the next run works on it.`;
+  return `opened #${created.number}, assigned to you; the bot starts on it next run`;
 }
 
 export function rejectProposal(ctx: Ctx, id: number, reason: string): Proposal {
