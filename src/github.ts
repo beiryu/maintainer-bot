@@ -231,6 +231,12 @@ export async function compareCommits(repo: string, base: string, head: string): 
   };
 }
 
+/** The merge base of two refs, per GitHub (the clones here are shallow). */
+export async function mergeBase(repo: string, base: string, head: string): Promise<string | null> {
+  const c = await ghJson<{ merge_base_commit?: { sha: string } }>(['api', `repos/${repo}/compare/${base}...${head}`]);
+  return c.merge_base_commit?.sha ?? null;
+}
+
 export async function fileAtRef(repo: string, path: string, ref: string): Promise<string> {
   return gh(['api', `repos/${repo}/contents/${path}?ref=${ref}`, '-H', 'Accept: application/vnd.github.raw']);
 }

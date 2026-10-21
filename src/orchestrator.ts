@@ -999,6 +999,31 @@ export async function afterCommit(cfg: Config, rc: RepoConfig, push: string, bas
   return `${await git(push, ['diff', '--binary', base, 'HEAD'])}\n`;
 }
 
+/**
+ * The PR branch must still be exactly the bot's patch on top of its base, so that a commit
+ * made elsewhere (a suggestion committed on GitHub) is never overwritten. "Update branch"
+ * merges from the default branch are the maintainer's doing and allowed: the branch is then
+ * checked against the merge base, which becomes the issue's base. Returns that base.
+ */
+async function verifyBranchIsOurs(push: string, rc: RepoConfig, issue: Issue, tip: string): Promise<string> {
+  const foreign = async (base: string) => {
+    await git(push, ['read-tree', '--reset', '-u', base]);
+    await applyPatch(push, loadPatch(issue));
+    return git(push, ['diff', '--cached', '--name-only', tip]);
+  };
+  let unknown = await foreign(issue.base_sha!);
+  if (unknown) {
+    const mb = await gh.mergeBase(rc.full_name, rc.default_branch, issue.branch!);
+    if (mb && mb !== issue.base_sha) {
+      await git(push, ['fetch', '--quiet', '--depth', '1', 'fork', mb]);
+      unknown = await foreign(mb);
+      if (!unknown) return mb;
+    }
+    throw new Error(`the PR branch has changes the bot did not make (${unknown.split('\n').join(', ')}); handle it by hand or reject the drafted action`);
+  }
+  return issue.base_sha!;
+}
+
 /** Replaces the PR branch with one commit of the rebased patch; refuses if the branch moved since the bot last pushed it. */
 async function approveRebase(ctx: Ctx, action: PendingAction, issue: Issue, pr: Pr) {
   const { cfg, db } = ctx;
@@ -1013,14 +1038,7 @@ async function approveRebase(ctx: Ctx, action: PendingAction, issue: Issue, pr: 
   await git(push, ['remote', 'add', 'fork', `https://github.com/${rc.full_name}.git`]);
   await git(push, [...who, 'fetch', '--quiet', '--depth', '50', 'fork', issue.branch!]);
   const remoteSha = await git(push, ['rev-parse', 'FETCH_HEAD']);
-  // The branch must still be exactly old base + PATCH.diff: never overwrite someone else's commit.
-  await git(push, ['read-tree', '--reset', '-u', issue.base_sha!]);
-  await applyPatch(push, loadPatch(issue));
-  const unknown = await git(push, ['diff', '--cached', '--name-only', 'FETCH_HEAD']);
-  if (unknown) {
-    throw new Error(`the PR branch has changes the bot did not make (${unknown.split('\n').join(', ')}); `
-      + `rebase by hand or run: maintainer-bot reject a${action.id}`);
-  }
+  await verifyBranchIsOurs(push, rc, issue, remoteSha);
   await git(push, ['read-tree', '--reset', '-u', action.base_sha!]);
   await applyPatch(push, action.patch!);
   await git(push, [...who, 'commit', ...(rc.signoff ? ['--signoff'] : []), '-m', issue.pr_title ?? `Fix #${issue.number}`, '-m', `Closes #${issue.number}`]);
@@ -1087,21 +1105,17 @@ export async function approveFollowup(ctx: Ctx, actionId: number, opts: { messag
     await git(push, [...who, 'fetch', '--quiet', 'fork', issue.branch!]);
     await git(push, ['reset', '--quiet', '--hard', 'FETCH_HEAD']);
     const remoteSha = await git(push, ['rev-parse', 'HEAD']);
-    await git(push, ['read-tree', '--reset', '-u', issue.base_sha!]);
-    await applyPatch(push, loadPatch(issue));
-    const unknown = await git(push, ['diff', '--cached', '--name-only', 'FETCH_HEAD']);
-    await git(push, ['reset', '--quiet', '--hard', 'FETCH_HEAD']);
-    if (unknown) {
-      throw new Error(`the PR branch has changes the bot did not make (${unknown.split('\n').join(', ')}); `
-        + `apply the follow-up by hand or run: maintainer-bot reject a${actionId}`);
-    }
+    const base = await verifyBranchIsOurs(push, rc, issue, remoteSha);
+    await git(push, ['reset', '--quiet', '--hard', remoteSha]);
     // Reset the tree to base, apply the full new patch: the commit holds exactly the delta.
-    await git(push, ['read-tree', '--reset', '-u', issue.base_sha!]);
-    await applyPatch(push, action.patch);
+    // The patch was made on the old base; on a branch updated from main it is merged in (3-way).
+    await git(push, ['read-tree', '--reset', '-u', base]);
+    await applyPatch(push, action.patch, base !== issue.base_sha);
     await git(push, [...who, 'commit', ...(rc.signoff ? ['--signoff'] : []), '-m', followupCommitMessage(dir, issue.pr_title)]);
-    const full = await afterCommit(cfg, rc, push, issue.base_sha!, who);
+    const full = await afterCommit(cfg, rc, push, base, who);
     await pushBranch(cfg, rc, push, issue.branch!, remoteSha, { who, expectedHead: remoteSha });
     savePatch(db, issue, full);
+    if (base !== issue.base_sha) db.update(issue.id, { base_sha: base });
   }
   if (message) await gh.commentOnIssue(issue.repo, pr.number, message);
   db.setActionStatus(actionId, 'done');

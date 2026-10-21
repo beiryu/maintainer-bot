@@ -304,8 +304,8 @@ ciOpts(ci.command('publish')).description('with the maintainer\'s token: carry o
   .action(async (o) => {
     const c = ciCtx(o, true);
     const previous = await pullState(o.repo);
-    const event = o.event ? JSON.parse(readFileSync(o.event, 'utf8')) : undefined;
-    const notes = await ciPublish(c, { repo: o.repo, event, eventName: o.eventName, draft: !!o.draft, runUrl: o.runUrl });
+    // --event/--event-name are accepted for the workflow's sake; decisions are read from the dashboard itself.
+    const notes = await ciPublish(c, { repo: o.repo, draft: !!o.draft, runUrl: o.runUrl });
     for (const n of notes) console.log(`note: ${n}`);
     const head = await pushState(o.repo, c.db.exportJson({ resultChars: 1500 }), previous);
     console.log(head ? `state saved on ${STATE_BRANCH} @ ${head.slice(0, 10)}` : 'state unchanged');

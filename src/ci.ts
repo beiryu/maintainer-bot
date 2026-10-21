@@ -120,29 +120,19 @@ export async function ciAgent(ctx: Ctx, opts: { repo: string; dry: boolean }) {
 
 // ---------------------------------------------------------------- publish job
 
-/** The parts of a GitHub event payload the publish step looks at. */
-export interface EventPayload {
-  action?: string;
-  sender?: { login: string };
-  issue?: { number: number; body: string | null };
-  comment?: { body: string; user: { login: string } };
-}
+export interface PublishOpts { repo: string; draft: boolean; runUrl?: string }
 
-export interface PublishOpts { repo: string; eventName?: string; event?: EventPayload; draft: boolean; runUrl?: string }
-
-async function dashboardIssue(ctx: Ctx, repo: string, body: string): Promise<{ number: number; body: string; created: boolean }> {
+/** The dashboard issue of a repo, found by the number on record or by its marker; null when there is none yet. */
+async function findDashboard(ctx: Ctx, repo: string): Promise<{ number: number; body: string } | null> {
   const { db } = ctx;
   const known = db.get(`dashboard:${repo}`);
   if (known) {
     const i = await gh.getIssue(repo, Number(known));
-    if (i.state === 'OPEN') return { number: i.number, body: i.body ?? '', created: false };
+    if (i.state === 'OPEN') return { number: i.number, body: i.body ?? '' };
   }
   const found = (await gh.findIssuesByBody(repo, 'maintainer-bot:dashboard')).find((i) => i.body.includes(DASHBOARD_MARK));
-  if (found) { db.set(`dashboard:${repo}`, String(found.number)); return { number: found.number, body: found.body, created: false }; }
-  const created = await gh.createIssue(repo, { title: DASHBOARD_TITLE, body });
-  db.set(`dashboard:${repo}`, String(created.number));
-  await gh.pinIssue(repo, created.number).catch(() => undefined);
-  return { number: created.number, body, created: true };
+  if (found) { db.set(`dashboard:${repo}`, String(found.number)); return { number: found.number, body: found.body }; }
+  return null;
 }
 
 /** Carries out one ticked decision; the text returned is shown on the dashboard when it fails. */
@@ -184,25 +174,32 @@ export async function ciPublish(ctx: Ctx, opts: PublishOpts): Promise<string[]> 
   db.upsertRepo(repo);
   await ensureMirror(repo, rc.default_branch);
 
-  // 1. What the maintainer decided on the dashboard.
-  const ev = opts.event;
-  const onDashboard = !!ev?.issue?.body?.includes(DASHBOARD_MARK);
-  const byMe = ev?.sender?.login?.toLowerCase() === me;
+  // 1. What the maintainer decided on the dashboard: read from the issue itself, not from the
+  // event that started this run (queued runs get replaced, and with them their payload).
+  const dash = await findDashboard(ctx, repo);
   let decided = false;
-  if (onDashboard && byMe && opts.eventName === 'issues' && ev?.action === 'edited') {
-    for (const t of parseTicks(ev!.issue!.body!)) {
+  if (dash) {
+    for (const t of parseTicks(dash.body)) {
       decided = true;
       try { await applyTick(ctx, t); log(`${t.id}${t.flag ? `:${t.flag}` : ''}: done`); }
       catch (e) { notes.push(`❌ ${t.id}: ${(e as Error).message.split('\n')[0].slice(0, 300)}`); log(`${t.id}: ${(e as Error).message}`); }
     }
-  }
-  if (onDashboard && byMe && opts.eventName === 'issue_comment' && ev?.action === 'created' && ev.comment?.user.login.toLowerCase() === me) {
-    for (const c of parseCommands(ev.comment.body)) {
-      decided = true;
-      try { log(applyCommand(ctx, repo, c)); } catch (e) { notes.push(`❌ ${JSON.stringify(c)}: ${(e as Error).message.slice(0, 300)}`); }
+    // Commands: the maintainer's comments since the last run; older ones were handled or predate the bot.
+    const seenKey = `dashboard-seen:${repo}`;
+    const seen = db.get(seenKey);
+    const comments = (await gh.issueComments(repo, dash.number)).filter((c) => c.author.toLowerCase() === me);
+    const fresh = seen ? comments.filter((c) => c.createdAt > seen) : [];
+    for (const c of fresh) {
+      for (const cmd of parseCommands(c.body)) {
+        decided = true;
+        try { log(applyCommand(ctx, repo, cmd)); } catch (e) { notes.push(`❌ ${JSON.stringify(cmd)}: ${(e as Error).message.slice(0, 300)}`); }
+      }
+      if (/^\s*\/pause\s*$/m.test(c.body)) { db.set('paused', '1'); decided = true; }
+      if (/^\s*\/resume\s*$/m.test(c.body)) { db.set('paused', null); decided = true; }
     }
-    if (/^\s*\/pause\s*$/m.test(ev.comment.body)) { db.set('paused', '1'); decided = true; }
-    if (/^\s*\/resume\s*$/m.test(ev.comment.body)) { db.set('paused', null); decided = true; }
+    const last = comments.at(-1)?.createdAt;
+    if (last && (!seen || last > seen)) db.set(seenKey, last);
+    else if (!seen) db.set(seenKey, new Date().toISOString());
   }
 
   // 2. PRs the agent step got ready.
@@ -224,10 +221,14 @@ export async function ciPublish(ctx: Ctx, opts: PublishOpts): Promise<string[]> 
     repo, runUrl: opts.runUrl, notes, monthCostUsd: db.costSince(monthStart()),
     monthLimitUsd: cfg.budget.max_cost_per_month_usd || undefined, tokenExpiry: await gh.tokenExpiry(),
   });
-  const d = await dashboardIssue(ctx, repo, body);
-  if (!d.created && (decided || dashboardChanged(d.body, body))) {
-    await gh.editIssueBody(repo, d.number, body);
-    log(`dashboard #${d.number} updated`);
+  if (!dash) {
+    const created = await gh.createIssue(repo, { title: DASHBOARD_TITLE, body });
+    db.set(`dashboard:${repo}`, String(created.number));
+    await gh.pinIssue(repo, created.number).catch(() => undefined);
+    log(`dashboard #${created.number} created`);
+  } else if (decided || dashboardChanged(dash.body, body)) {
+    await gh.editIssueBody(repo, dash.number, body);
+    log(`dashboard #${dash.number} updated`);
   }
   return notes;
 }
