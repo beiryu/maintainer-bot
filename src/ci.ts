@@ -189,9 +189,14 @@ export function stopComment(reason: string, number: number, dashboard: string): 
   const why = reason
     .replace(/^(coder gave up|error|triage: not feasible|Reviewer: no rework can fix this):\s*/i, '')
     .replace(/^Blocked:\s*/i, '')
+    // It is posted as the maintainer: no third person for them or for the tool that did the work.
+    .replace(/\b(the )?(bot|agent|coder|implementer)( itself)?\b/gi, 'I')
+    .replace(/\b(the )?maintainer (must|needs to|has to|should)\b/gi, 'Need to')
+    .replace(/\b(the )?maintainer\b/gi, 'me')
+    .replace(/\bI cannot\b/g, "I can't")
     .replace(/\s+/g, ' ').trim().slice(0, 500);
-  return `Pausing this one: ${why}${/[.!?]$/.test(why) ? '' : '.'}\n\n`
-    + `Once that's in place, \`/retry #${number}\`${dashboard ? ` on ${dashboard}` : ''} picks it up again.`;
+  void number; void dashboard;
+  return `Pausing this one: ${why}${/[.!?]$/.test(why) ? '' : '.'}`;
 }
 
 const label = (c: Command) => c.cmd === 'approve' || c.cmd === 'reject' ? `${c.cmd} ${c.id}${'flag' in c && c.flag ? ` --${c.flag}` : ''}` : `${c.cmd} #${c.number}`;
