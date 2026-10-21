@@ -1,5 +1,6 @@
-# maintainer-bot as a reusable workflow. A repo calls it (see templates/maintainer.yml) and
-# keeps its own settings in .github/maintainer-bot.yml. One run = one pass, in two jobs:
+# maintainer-bot as a reusable workflow. A repo calls it pinned to a commit (see
+# templates/maintainer.yml) and keeps its own settings in .github/maintainer-bot.yml; the
+# bot's code is checked out at that same commit. One run = one pass, in two jobs:
 #
 #   agent    reads the repo with the job's own read-only token, runs the agents and the gate,
 #            and hands over nothing but a state file (artifact). The model credential is the
@@ -16,10 +17,6 @@ name: maintainer-bot
 on:
   workflow_call:
     inputs:
-      bot_ref:
-        description: the maintainer-bot ref to run (the same one as in `uses:`)
-        type: string
-        default: v1
       draft_prs:
         description: open pull requests as drafts (for a pilot)
         type: boolean
@@ -58,7 +55,7 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           repository: beiryu/maintainer-bot
-          ref: ${{ inputs.bot_ref }}
+          ref: ${{ github.job_workflow_sha }}   # the very revision the caller pinned in `uses:`
           path: .bot
           persist-credentials: false
       - name: Read the repo's bot config
@@ -122,7 +119,7 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           repository: beiryu/maintainer-bot
-          ref: ${{ inputs.bot_ref }}
+          ref: ${{ github.job_workflow_sha }}   # the very revision the caller pinned in `uses:`
           path: .bot
           persist-credentials: false
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
