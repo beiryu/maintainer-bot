@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { DASHBOARD_MARK, dashboardChanged, itemComment, parseCommands, pendingItems, renderDashboard } from '../src/dashboard.js';
+import { DASHBOARD_MARK, dashboardChanged, itemComment, parseCommands, parseCommandTitle, pendingItems, renderDashboard } from '../src/dashboard.js';
 import { Db } from '../src/db.js';
 
 const cfg = { repos: [{ full_name: 'o/r', sources: [] }], limits: { max_in_flight_per_repo: 1 }, budget: { max_cost_per_call_usd: 3 } } as never;
@@ -34,13 +34,15 @@ describe('renderDashboard', () => {
     expect(body).toContain('React on the comments below');
     const items = pendingItems(db, 'o/r');
     expect(items.map((i) => i.id)).toEqual([`p${p}`, `a${a}`, `d${d1}`, `d${d2}`]);
-    const card = (id: string) => itemComment(items.find((i) => i.id === id)!);
+    const card = (id: string) => itemComment(items.find((i) => i.id === id)!, 'me/desk', 'o/r');
     expect(card(`p${p}`)).toContain('  **Problem**\n  Body <!- - evil -->');
-    expect(card(`p${p}`)).toContain(`👍 approve · 👎 reject · or copy:\n\n\`\`\`\n/a p${p}\n\`\`\``);
+    expect(card(`p${p}`)).toContain(`[👍 Approve](https://github.com/me/desk/issues/new?title=%2Fa%20p${p}%20(o%2Fr)) · [👎 Reject](https://github.com/me/desk/issues/new?title=%2Fr%20p${p}%20(o%2Fr))`);
+    expect(card(`d${d1}`)).toContain('title=%2Fa%20d' + d1 + '%20--take%20(o%2Fr)');
+    expect(card(`d${d2}`)).toContain('title=%2Fa%20d' + d2 + '%20--changes%20(o%2Fr)');
     expect(card(`a${a}`)).toContain('> Fixed the null case.');
     expect(card(`a${a}`)).not.toContain('for you only');
-    expect(card(`d${d1}`)).toContain('🚀 approve and also assign it to you');
-    expect(card(`d${d2}`)).toContain('🚀 approve and post as "request changes"');
+    expect(card(`d${d1}`)).toContain('🚀 Approve and also assign it to you');
+    expect(card(`d${d2}`)).toContain('🚀 Approve and post as "request changes"');
     // The card's copy block is a command only once the maintainer posts it; the card itself is skipped by marker.
     expect(body).toContain('- [#20](https://github.com/o/r/pull/20) ❌ fix(x): thing · changes requested');
     expect(body).toContain('- [#2](https://github.com/o/r/issues/2) issue 2 · coded');
@@ -64,6 +66,15 @@ describe('renderDashboard', () => {
     expect(dashboardChanged(a, `${a}\n- new`)).toBe(true);
     expect(dashboardChanged('- [ ] **p1** x · proposed 2 min ago', '- [ ] **p1** x · proposed 3 min ago')).toBe(false);
     expect(dashboardChanged('- [ ] **p1** x · proposed 2 min ago', '- [ ] **p2** x · proposed 2 min ago')).toBe(true);
+  });
+});
+
+describe('parseCommandTitle', () => {
+  it('reads the command and the repo from a command issue title', () => {
+    expect(parseCommandTitle('/a p4 (beiryu/vn-skills)')).toEqual({ repo: 'beiryu/vn-skills', text: '/a p4' });
+    expect(parseCommandTitle('/r d2 not now (o/r)')).toEqual({ repo: 'o/r', text: '/r d2 not now' });
+    expect(parseCommandTitle('beiryu/vn-skills')).toBeNull();
+    expect(parseCommands(parseCommandTitle('/a d2 --take (o/r)')!.text)).toEqual([{ cmd: 'approve', id: 'd2', flag: 'take' }]);
   });
 });
 

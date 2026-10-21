@@ -6,20 +6,25 @@ name: relay
 on:
   issue_comment:
     types: [created]
+  issues:
+    types: [opened]                          # the Approve / Reject links open an issue titled with the command
 
 permissions: {}
 
 jobs:
   relay:
-    # Not for the comments the run itself posts (item cards, replies): those would only start another run.
+    # Comments on a dashboard, or an issue opened from a card link ("/a p4 (owner/repo)"); never what a run posts itself.
     if: >-
-      github.event.comment.user.login == github.repository_owner && contains(github.event.issue.body, 'maintainer-bot:repo ')
-      && !contains(github.event.comment.body, '<!-- maintainer-bot:')
+      github.actor == github.repository_owner && (
+        (github.event_name == 'issue_comment' && contains(github.event.issue.body, 'maintainer-bot:repo ') && !contains(github.event.comment.body, '<!-- maintainer-bot:'))
+        || (github.event_name == 'issues' && startsWith(github.event.issue.title, '/')))
     runs-on: ubuntu-latest
     steps:
       - env:
           GH_TOKEN: ${{ secrets.MAINTAINER_TOKEN || secrets.DISPATCH_TOKEN }}
           BODY: ${{ github.event.issue.body }}
+          TITLE: ${{ github.event.issue.title }}
         run: |
-          repo=$(printf '%s' "$BODY" | sed -n 's/.*maintainer-bot:repo \([A-Za-z0-9_.-]*\/[A-Za-z0-9_.-]*\) -->.*/\1/p' | head -1)
+          repo=$(printf '%s' "$TITLE" | sed -n 's/.*(\([A-Za-z0-9_.-]*\/[A-Za-z0-9_.-]*\))[[:space:]]*$/\1/p')
+          [ -n "$repo" ] || repo=$(printf '%s' "$BODY" | sed -n 's/.*maintainer-bot:repo \([A-Za-z0-9_.-]*\/[A-Za-z0-9_.-]*\) -->.*/\1/p' | head -1)
           gh workflow run maintainer.yml -R "$repo"

@@ -2,7 +2,7 @@ import { readFileSync } from 'node:fs';
 import { parse } from 'yaml';
 import { z } from 'zod';
 import { type Config, parseConfig, repoConfig, RepoConfigSchema, repoOwner } from './config.js';
-import { type Command, DASHBOARD_MARK, dashboardChanged, dashboardTitle, itemComment, parseCommands, pendingItems, renderDashboard, repoMark } from './dashboard.js';
+import { type Command, DASHBOARD_MARK, dashboardChanged, dashboardTitle, itemComment, parseCommands, parseCommandTitle, pendingItems, renderDashboard, repoMark } from './dashboard.js';
 import type { Db, StateJson } from './db.js';
 import { ensureMirror } from './git.js';
 import * as gh from './github.js';
@@ -224,6 +224,26 @@ export async function ciPublish(ctx: Ctx, opts: PublishOpts): Promise<string[]> 
     // First run on this dashboard: earlier comments are history, not orders.
     const fresh = lastDone ? comments.filter((c) => c.id > lastDone && c.author.toLowerCase() === me && !c.body.includes(REPLY_MARK) && !c.body.includes('maintainer-bot:item')) : [];
     for (const c of fresh) {
+      const reply = await runCommands(c.body);
+      if (reply) await gh.commentOnIssue(desk, dash.number, reply).catch((e) => log(`reply failed: ${(e as Error).message}`));
+    }
+    const newest = comments.at(-1)?.id ?? 0;
+    db.set(doneKey, String(Math.max(lastDone, newest, 1)));
+
+    // Command issues: the links on the item cards open a new issue whose title is the command.
+    // Each is answered and closed, so the desk's closed issues are the log of decisions.
+    const asks = (await gh.listOpenIssues(desk, [], 100))
+      .filter((i) => i.author?.login.toLowerCase() === me && parseCommandTitle(i.title)?.repo === repo);
+    for (const i of asks) {
+      const reply = await runCommands(parseCommandTitle(i.title)!.text);
+      await gh.closeIssue(desk, i.number, reply ?? `${REPLY_MARK}\nNot a command I know.`).catch((e) => log(`#${i.number}: ${(e as Error).message}`));
+    }
+  }
+
+  /** Runs the commands in a text; returns the reply to post, or null when it held none. */
+  async function runCommands(text: string): Promise<string | null> {
+    {
+      const c = { body: text };
       // `/a all`: every pending item an agent can carry out; [needs you] proposals stay.
       const cmds = parseCommands(c.body).flatMap((cmd) => cmd.cmd === 'approve' && cmd.id === 'all'
         ? [
@@ -233,7 +253,7 @@ export async function ciPublish(ctx: Ctx, opts: PublishOpts): Promise<string[]> 
         ]
         : [cmd]);
       const pause = /^\s*\/pause\s*$/m.test(c.body), resume = /^\s*\/resume\s*$/m.test(c.body);
-      if (!cmds.length && !pause && !resume) continue;
+      if (!cmds.length && !pause && !resume) return null;
       decided = true;
       const results: string[] = [];
       for (const cmd of cmds) {
@@ -243,11 +263,8 @@ export async function ciPublish(ctx: Ctx, opts: PublishOpts): Promise<string[]> 
       if (pause) { db.set('paused', '1'); results.push('⏸ paused: no agent runs until `/resume`'); }
       if (resume) { db.set('paused', null); results.push('▶️ resumed'); }
       for (const r of results) log(r);
-      const reply = `${REPLY_MARK}\n${results.join('\n')}${opts.runUrl ? ` · [log](${opts.runUrl})` : ''}`;
-      await gh.commentOnIssue(desk, dash.number, reply).catch((e) => log(`reply failed: ${(e as Error).message}`));
+      return `${REPLY_MARK}\n${results.join('\n')}${opts.runUrl ? ` · [log](${opts.runUrl})` : ''}`;
     }
-    const newest = comments.at(-1)?.id ?? 0;
-    db.set(doneKey, String(Math.max(lastDone, newest, 1)));
   }
 
   // 1b. Reactions on the item comments: 👍 approve, 👎 reject, 🚀 approve with the item's variant.
@@ -284,7 +301,7 @@ export async function ciPublish(ctx: Ctx, opts: PublishOpts): Promise<string[]> 
     }
     for (const it of pendingItems(db, repo)) {
       if (db.get(itemKey(it.id))) continue;
-      try { db.set(itemKey(it.id), String(await gh.addComment(desk, dash.number, itemComment(it)))); }
+      try { db.set(itemKey(it.id), String(await gh.addComment(desk, dash.number, itemComment(it, desk, repo)))); }
       catch (e) { log(`${it.id}: item comment not posted: ${shortError(e)}`); }
     }
   }

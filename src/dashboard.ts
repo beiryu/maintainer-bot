@@ -100,11 +100,27 @@ export function pendingItems(db: Db, repo: string): PendingItem[] {
   return out;
 }
 
-/** The comment that stands for one pending item: react on it to decide. */
-export function itemComment(it: PendingItem): string {
-  const keys = `👍 approve · 👎 reject${it.rocket ? ` · 🚀 approve and ${it.rocket}` : ''} · or copy:`;
-  // A fenced block gets GitHub's copy button: one tap, then paste as a comment.
-  return `${itemMark(it.id)}\n${it.line}\n\n${keys}\n\n\`\`\`\n/a ${it.id}\n\`\`\`\n${it.detail}`;
+/**
+ * A link that opens a new issue in the desk repo with `cmd` as its title: on a phone that is
+ * two taps (the link, then Submit). The repo it is for rides in the title.
+ */
+export const commandLink = (label: string, cmd: string, desk: string, repo: string) =>
+  `[${label}](https://github.com/${desk}/issues/new?title=${encodeURIComponent(`${cmd} (${repo})`)})`;
+
+/** The comment that stands for one pending item, with one link per decision. */
+export function itemComment(it: PendingItem, desk: string, repo: string): string {
+  const links = [
+    commandLink('👍 Approve', `/a ${it.id}`, desk, repo),
+    commandLink('👎 Reject', `/r ${it.id}`, desk, repo),
+    ...(it.rocket ? [commandLink(`🚀 Approve and ${it.rocket}`, `/a ${it.id} ${it.id[0] === 'd' && /changes/.test(it.rocket) ? '--changes' : '--take'}`, desk, repo)] : []),
+  ].join(' · ');
+  return `${itemMark(it.id)}\n${it.line}\n\n${links}\n${it.detail}`;
+}
+
+/** `/a a3 (owner/repo)` → the repo and the command text without it; null when the title is not one. */
+export function parseCommandTitle(title: string): { repo: string; text: string } | null {
+  const m = /^\s*(\/.+?)\s*\(([\w.-]+\/[\w.-]+)\)\s*$/.exec(title);
+  return m ? { repo: m[2], text: m[1] } : null;
 }
 export const itemMark = (id: string) => `<!-- maintainer-bot:item ${id} -->`;
 
