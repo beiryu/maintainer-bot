@@ -35,7 +35,7 @@ const BotBlock = z.object({
   setup: z.array(z.string()).default([]),
   budget: z.object({ max_cost_per_call_usd: z.number().optional(), max_cost_per_month_usd: z.number().optional(), per_agent_usd: z.record(z.string(), z.number()).optional() }).default({}),
   limits: z.object({
-    max_attempts: z.number().optional(), max_triage_per_run: z.number().optional(),
+    max_attempts: z.number().optional(), max_open_prs: z.number().optional(),
   }).default({}),
   agent_timeout_min: z.number().optional(),
   gate_timeout_min: z.number().optional(),

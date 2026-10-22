@@ -7,7 +7,7 @@ import * as gh from './github.js';
 import type { Ctx } from './orchestrator.js';
 
 // Upstream watcher: what the repo pins (a commit in its build script, a page it describes) versus
-// what is there now. Plain code gathers the difference; the auditor decides whether it matters.
+// what is there now. Plain code gathers the difference; the planner decides whether it matters.
 
 /** The 40-hex sha that follows the repo's name in `file`, e.g. `repo: 'a/b', sha: '…'` or a markdown table row. */
 export function pinnedSha(file: string, repo: string): string | null {
@@ -49,7 +49,7 @@ async function fetchText(url: string): Promise<string> {
   return (await r.text()).replace(/<script[\s\S]*?<\/script>|<style[\s\S]*?<\/style>/gi, '').replace(/<[^>]+>/g, ' ').replace(/[ \t]+/g, ' ').replace(/\s*\n\s*/g, '\n').trim();
 }
 
-/** Lines in `b` not in `a` and vice versa, capped: enough for the auditor to see what moved. */
+/** Lines in `b` not in `a` and vice versa, capped: enough for the planner to see what moved. */
 export function lineDiff(a: string, b: string, max = 40): string {
   const A = new Set(a.split('\n')), B = new Set(b.split('\n'));
   const added = [...B].filter((l) => !A.has(l)).slice(0, max);
@@ -71,7 +71,7 @@ async function checkUrl(ctx: Ctx, rc: RepoConfig, s: SourceConfig): Promise<Sour
   return { name: s.name, pinned: prev.pinned, upstream: hash, digest: `${s.name} (${s.url}) changed since last check${s.note ? ` — ${s.note}` : ''}:\n${lineDiff(old, text)}` };
 }
 
-/** Checks every source of a repo, stores the result, returns the text the auditor gets. */
+/** Checks every source of a repo, stores the result, returns the text the planner gets. */
 export async function sourceDigest(ctx: Ctx, rc: RepoConfig, log: (m: string) => void): Promise<string> {
   const parts: string[] = [];
   for (const s of rc.sources) {

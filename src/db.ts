@@ -71,7 +71,7 @@ export interface Pr {
   ci_seen_sha: string | null;  // head whose failed CI the follow-up already looked at
 }
 
-/** An issue the auditor wants to open; the human approves or rejects it in the inbox. */
+/** An issue the planner wants to open; the human approves or rejects it in the inbox. */
 export interface Proposal {
   id: number;
   repo: string;
@@ -81,7 +81,7 @@ export interface Proposal {
   labels: string;              // JSON string[]
   rationale: string;
   evidence: string;            // JSON string[] (paths, commits, urls)
-  covers_issue: number | null; // an open issue that already covers this, per the auditor
+  covers_issue: number | null; // an open issue that already covers this, per the planner
   covers_rm: string | null;    // a roadmap item id (RM-NNN) this implements
   status: 'pending' | 'approved' | 'rejected' | 'filed';
   reject_reason: string | null;
@@ -97,7 +97,7 @@ export interface SourceState {
   name: string;
   pinned: string | null;       // sha (github) or content hash (url) the repo is built from
   upstream: string | null;     // what upstream has now
-  digest: string | null;       // human-readable difference, handed to the auditor
+  digest: string | null;       // human-readable difference, handed to the planner
   checked_at: string;
 }
 
@@ -445,7 +445,7 @@ export class Db {
     ).all() as (Pr & { repo: string; issue_number: number; title: string; pr_title: string | null; blocked: string | null })[];
   }
 
-  // --- proposals (issues the auditor wants to open) ---
+  // --- proposals (issues the planner wants to open) ---
   addProposal(p: Omit<Proposal, 'id' | 'status' | 'reject_reason' | 'issue_number' | 'issue_id' | 'created_at'>): number {
     return Number(this.sql.prepare(
       `INSERT INTO proposals (repo, kind, title, body, labels, rationale, evidence, covers_issue, covers_rm, run_id, created_at)

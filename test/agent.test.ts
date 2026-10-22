@@ -81,7 +81,7 @@ describe('deep audit agents', () => {
   it('gives the web to the researcher only, and accepts findings with evidence', () => {
     expect('web' in AGENTS.researcher && AGENTS.researcher.web).toBe(true);
     expect('web' in AGENTS.tryout).toBe(false);
-    expect('web' in AGENTS.auditor).toBe(false);
+    expect('web' in AGENTS.planner).toBe(false);
     const r = AGENTS.inspector.schema.parse({ findings: [{ title: 't', detail: 'd', evidence: ['$ x', 'out'] }] });
     expect(r).toEqual({ findings: [{ title: 't', detail: 'd', evidence: ['$ x', 'out'] }], summary: '' });
   });

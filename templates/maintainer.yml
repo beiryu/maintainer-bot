@@ -17,14 +17,14 @@ on:
   pull_request_target:
     types: [opened, synchronize]             # other people's PRs: reviewed from the diff and CI, never run
   schedule:
-    - cron: '0 2,8 * * *'                    # research: web, newcomer tryout, code inspection (09:00 and 15:00 Vietnam)
-    - cron: '30 2-13 * * *'                  # audit: upstream sources + proposals, hourly 09:30–20:30 Vietnam
+    - cron: '0 2,8 * * *'                    # research: the list, then the issues to open next (09:00 and 15:00 Vietnam)
+    - cron: '30 2-13 * * *'                  # audit: issues and PRs, hourly 09:30–20:30 Vietnam
   workflow_dispatch:
     inputs:
       task:
         type: choice
-        options: [pass, research, audit]
-        default: pass
+        options: [audit, research]
+        default: audit
 
 # The most GITHUB_TOKEN may do in the called workflow: its agent job reads with these, its
 # publish job uses the maintainer's PAT and asks for nothing.
@@ -51,9 +51,9 @@ jobs:
     # Pinned to a commit: that revision of the bot is what runs with the secrets (Dependabot bumps it).
     uses: beiryu/maintainer-bot/.github/workflows/agent.yml@0000000000000000000000000000000000000000 # v1
     with:
-      # Each schedule is one task; keep these crons in step with the ones above.
-      # Different minutes: a run that waits in the concurrency group is replaced by the next one.
-      task: ${{ github.event.schedule == '0 2,8 * * *' && 'research' || github.event.schedule == '30 2-13 * * *' && 'audit' || inputs.task || 'pass' }}
+      # The research cron runs research; the other one, and every event, runs the audit. Different
+      # minutes: a run that waits in the concurrency group is replaced by the next one.
+      task: ${{ github.event.schedule == '0 2,8 * * *' && 'research' || inputs.task || 'audit' }}
       draft_prs: true                        # pilot: PRs open as drafts; set false once trusted
     # MAINTAINER_TOKEN lives in the environment "bot", which only the called workflow's publish job
     # enters; inherit is the only way an environment secret reaches a called workflow.

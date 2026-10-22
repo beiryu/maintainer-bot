@@ -1,7 +1,7 @@
 import type { Config } from './config.js';
 import { ACTIVE_STATES, type Db } from './db.js';
 import { replyText } from './orchestrator.js';
-import { researchItems, SOURCE_LABEL } from './research.js';
+import { type ResearchItem, researchItems } from './research.js';
 
 // The inbox as a pinned GitHub issue, for a bot that runs on GitHub Actions. The bot alone
 // writes it (its edits start no run); the maintainer decides by commenting /approve, /reject
@@ -171,7 +171,7 @@ export function renderDashboard(db: Db, cfg: Config, info: DashboardInfo): strin
     for (const s of src) L.push(`- **${s.name}**: ${esc(s.digest!.split('\n')[0])}`);
     L.push('');
   }
-  L.push(...researchSection(db, repo, now));
+  L.push(...researchSection(db, repo));
   L.push('---', 'Decide with the links on each item below. Also: `/retry #N` · `/take N` · `/pause` · `/resume`');
   return L.join('\n');
 }
@@ -183,34 +183,36 @@ const brief = (s: string, max = 180) => {
 };
 
 /**
- * The research list, like a roadmap: one checkbox per item, grouped by where it came from.
- * Open items all show; done ones for 30 days. Tick an item here and the next run marks it done.
+ * The research list, like a roadmap: one checkbox per item, open ones first, nothing hidden.
+ * Tick an item here and the next run marks it done. Only GitHub's limit on an issue body can
+ * leave out the oldest done items.
  */
-export function researchSection(db: Db, repo: string, now = Date.now()): string[] {
+export function researchSection(db: Db, repo: string, room = 50_000): string[] {
   const items = researchItems(db, repo);
   if (!items.length) return [];
   const run = db.get(`researched:${repo}`);
-  const last = run ? JSON.parse(run) as { at: string; added: number } : null;
+  const last = run ? JSON.parse(run) as { at: string; added: number; planned?: number } : null;
   const open = items.filter((i) => !i.done).length;
+  const link = (n: number) => `[#${n}](https://github.com/${repo}/issues/${n})`;
+  const line = (i: ResearchItem) => {
+    const url = i.evidence.find((e) => /^https:\/\//.test(e));
+    const n = i.issue ?? (i.proposal ? db.proposal(i.proposal).issue_number : null);
+    const tail = [
+      n ? `→ ${link(n)}` : i.proposal ? `→ p${i.proposal}` : '',
+      url ? `[source](${url.split(/\s/)[0]})` : '',
+      i.done && i.note ? esc(i.note).slice(0, 80) : '',
+      i.found_at.slice(5, 10).split('-').reverse().join('/'),
+    ].filter(Boolean).join(' · ');
+    return `- [${i.done ? 'x' : ' '}] r${i.id} **${esc(i.title)}**: ${brief(i.detail)} · ${tail}`;
+  };
+  const lines = [...items.filter((i) => !i.done), ...items.filter((i) => i.done).reverse()].map(line);
+  let size = 0;
+  const shown = lines.filter((l) => (size += l.length + 1) <= room);
   const L = ['### Research', '',
-    `_${open} open · ${items.length - open} done${last ? ` · last run ${last.at.replace('T', ' ').slice(0, 16)} UTC, ${last.added} new` : ''}. Tick what is done._`, ''];
-  const cutoff = new Date(now - 30 * 86_400_000).toISOString();
-  for (const source of ['web', 'tryout', 'code'] as const) {
-    const rows = items.filter((i) => i.source === source && (!i.done || i.found_at >= cutoff));
-    if (!rows.length) continue;
-    L.push(`**${SOURCE_LABEL[source]}**`, '');
-    for (const i of [...rows.filter((i) => !i.done), ...rows.filter((i) => i.done)]) {
-      const url = i.evidence.find((e) => /^https:\/\//.test(e));
-      const tail = [
-        url ? `[source](${url.split(/\s/)[0]})` : '',
-        i.proposal ? `→ p${i.proposal}` : '',
-        i.done && i.note ? esc(i.note).slice(0, 80) : '',
-        i.found_at.slice(5, 10).split('-').reverse().join('/'),
-      ].filter(Boolean).join(' · ');
-      L.push(`- [${i.done ? 'x' : ' '}] r${i.id} **${esc(i.title)}**: ${brief(i.detail)} · ${tail}`);
-    }
-    L.push('');
-  }
+    `_${open} open · ${items.length - open} done${last ? ` · last run ${last.at.replace('T', ' ').slice(0, 16)} UTC: ${last.added} new, ${last.planned ?? 0} issue(s) opened` : ''}. Tick what is done._`, '',
+    ...shown];
+  if (shown.length < lines.length) L.push(`- … ${lines.length - shown.length} older done item(s) not shown (issue size limit)`);
+  L.push('');
   return L;
 }
 

@@ -1,7 +1,7 @@
 import { mkdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { runAgent } from './agent.js';
-import { repoLabels } from './audit.js';
+import { repoLabels } from './plan.js';
 import type { RepoConfig } from './config.js';
 import type { Draft } from './db.js';
 import { AGENT_META, freshClone, git, mirrorDir, slug } from './git.js';
@@ -35,8 +35,7 @@ export async function triageOutsideIssues(ctx: Ctx, rc: RepoConfig, log: (m: str
   const { cfg, db } = ctx;
   const me = await gh.currentUser();
   const issues = await gh.listOpenIssues(rc.full_name, [], 200);
-  const fresh = issues.filter((i) => isOutsider(i.author?.login, me) && !db.get(`outside-issue:${rc.full_name}#${i.number}`))
-    .slice(0, cfg.limits.max_triage_per_run);
+  const fresh = issues.filter((i) => isOutsider(i.author?.login, me) && !db.get(`outside-issue:${rc.full_name}#${i.number}`));
   const labels = (await repoLabels(rc.full_name)).join(', ');
   const others = issues.map((i) => `#${i.number} ${i.title}`).join('\n');
   const events: string[] = [];
@@ -88,7 +87,7 @@ export async function reviewOutsidePrs(ctx: Ctx, rc: RepoConfig, log: (m: string
     && db.get(`outside-pr:${rc.full_name}#${p.number}`) !== p.headSha && !db.pendingDraftFor(rc.full_name, 'pr', p.number));
   const labels = (await repoLabels(rc.full_name)).join(', ');
   const events: string[] = [];
-  for (const p of prs.slice(0, cfg.limits.max_triage_per_run)) {
+  for (const p of prs) {
     log(`${rc.full_name} PR #${p.number}: review (by @${p.author})`);
     const { dir } = await checkoutPr(rc, p.number, p.headSha);
     // The PR's own code runs here: the sandbox has no credentials and the clone is throwaway.

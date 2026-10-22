@@ -3,7 +3,7 @@ import { Command } from 'commander';
 import { randomUUID } from 'node:crypto';
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
-import { runAudit, runResearch } from './audit.js';
+import { runResearch } from './plan.js';
 import { ciAgent, ciConfig, ciPublish, deskRepo, pullState, pushState, setupOutputs, STATE_BRANCH } from './ci.js';
 import { loadConfig, repoConfig } from './config.js';
 import { doctor } from './doctor.js';
@@ -41,8 +41,8 @@ function ctx(runId: string | null = null): Ctx {
 const days = (d: number) => new Date(Date.now() - d * 86_400_000).toISOString();
 const log = (m: string) => console.log(`${new Date().toISOString()} ${m}`);
 
-program.command('run')
-  .description('one pass: follow up open PRs, pick up issues labelled for the bot, advance the pipeline, open PRs')
+program.command('run').alias('audit')
+  .description('the audit: follow up open PRs, other people\'s issues and PRs, work open issues assigned to you (up to max_open_prs)')
   .option('--dry', 'work on an issue without touching GitHub (no labels, no comments, no PR)')
   .option('--repo <owner/name>')
   .option('--issue <number>', 'work on this issue only (needs --repo)', Number)
@@ -56,22 +56,7 @@ program.command('run')
     }), c.cfg.lock_file);
   });
 
-program.command('research').description('research the web, try the project as a newcomer, inspect the code; the next audit reads the findings')
-  .option('--repo <owner/name>')
-  .action(async (o) => {
-    const c = ctx(randomUUID());
-    await withLock(async () => {
-      for (const rc of c.cfg.repos) {
-        if (o.repo && rc.full_name !== o.repo) continue;
-        const { ensureMirror } = await import('./git.js');
-        c.db.upsertRepo(rc.full_name);
-        await ensureMirror(rc.full_name, rc.default_branch);
-        await runResearch(c, rc, log);
-      }
-    }, c.cfg.lock_file);
-  });
-
-program.command('audit').description('check upstream sources and run the auditor now (with the last research findings); proposals land in the inbox')
+program.command('research').description('tick done items, research (web, newcomer tryout, code review) into the list, plan the issues to open next')
   .option('--repo <owner/name>')
   .action(async (o) => {
     const c = ctx(randomUUID());
@@ -82,8 +67,8 @@ program.command('audit').description('check upstream sources and run the auditor
         c.db.upsertRepo(rc.full_name);
         await ensureMirror(rc.full_name, rc.default_branch);
         const digest = await sourceDigest(c, rc, log);
-        const added = await runAudit(c, rc, digest, log);
-        for (const p of added) console.log(`  p${p.id}  [${p.kind}] ${p.title}`);
+        const r = await runResearch(c, rc, digest, log);
+        for (const p of r.planned) console.log(`  p${p.id}  [${p.kind}] ${p.title}`);
       }
       console.log(`\n${renderInbox(c.db, c.cfg)}`);
     }, c.cfg.lock_file);
@@ -302,11 +287,11 @@ ciOpts(ci.command('state-pull')).description('write the state branch\'s state.js
     writeFileSync(state, `${JSON.stringify(json ?? new Db(':memory:').exportJson(), null, 1)}\n`);
     console.log(head ? `state from ${STATE_BRANCH} @ ${head.slice(0, 10)}` : 'no state branch yet; starting empty');
   });
-ciOpts(ci.command('agent')).description('one task with read access only: a pass (agents, gate, review; PRs wait for `ci publish`), research or audit')
+ciOpts(ci.command('agent')).description('one task with read access only: the audit (agents, gate, review; PRs wait for `ci publish`) or research')
   .option('--dry', 'work on issues without preparing PRs')
-  .option('--task <task>', 'pass | research | audit', 'pass')
+  .option('--task <task>', 'audit | research', 'audit')
   .action(async (o) => {
-    if (!['pass', 'research', 'audit'].includes(o.task)) throw new Error(`--task must be pass, research or audit (got "${o.task}")`);
+    if (!['audit', 'research'].includes(o.task)) throw new Error(`--task must be audit or research (got "${o.task}")`);
     const c = ciCtx(o, false);
     await ciAgent(c, { repo: o.repo, dry: !!o.dry, task: o.task });
   });

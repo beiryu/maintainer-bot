@@ -35,7 +35,7 @@ these fields (leave a field out to keep its default):
   repo "owner/name", pinned_from: the file holding the pinned commit, paths: dirs that matter).
 - review_bots: bot logins whose inline review comments count as feedback.
 - after_commit: generators that must run after a commit (feeds, sitemaps), if CI checks them.
-- notes: 5-12 short lines of conventions the implementer, reviewer and auditor must follow
+- notes: 5-12 short lines of conventions the implementer, reviewer and planner must follow
   that are not obvious from the code: what a complete feature consists of, test style and
   fixtures, commit/PR title format, data provenance rules, what never to hand-edit, which
   facts must come from a cited source.

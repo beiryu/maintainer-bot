@@ -74,26 +74,26 @@ export const AGENTS = {
     access: WRITE, maxTurns: 40,
     schema: z.object({ action: z.enum(['reply', 'fix', 'wait', 'close', 'human']), message: z.string() }),
   },
-  // Turns the research findings and what changed since the last audit into proposals; light, runs often.
-  auditor: {
-    access: READ, maxTurns: 12,
+  // Research, last step: from the research list and the state of the repo, the issues to open next.
+  planner: {
+    access: READ, maxTurns: 40,
     schema: z.object({
-      proposals: z.array(z.object({
+      issues: z.array(z.object({
         title: z.string().max(120),
         body: z.string(),
         labels: z.array(z.string()).default([]),
         kind: z.enum(['feature', 'growth', 'bug', 'gap', 'docs', 'test', 'data', 'consistency', 'roadmap']).catch('gap'),
         rationale: z.string().default(''),
         evidence: z.array(z.string()).default([]),
-        // Set when an open issue or roadmap item already covers it: then it is shown, not filed twice.
-        covers_issue: z.number().nullable().default(null),
         covers_rm: z.string().nullable().default(null),
         // False when only a person can do it (needs a decision, money, an account, legal judgement).
         agent_suitable: z.boolean().default(true),
-        // Research items (r<n>) this proposal comes from.
+        // Research items (r<n>) this issue comes from.
         findings: z.array(z.number()).default([]),
       })).default([]),
-      // Research items that are done: their issue was closed, they no longer hold, or not worth doing.
+      // Items an open issue already covers.
+      covered: z.array(z.object({ id: z.number(), issue: z.number() })).default([]),
+      // Items that are done: the code already does it, it no longer holds, or it is not worth doing.
       resolved: z.array(z.object({ id: z.number(), why: z.string() })).default([]),
       summary: z.string().default(''),
     }),

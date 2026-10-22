@@ -1,6 +1,6 @@
 // ROADMAP.md as vn-skills writes it: one `### RM-NNN · scope: title` heading per item followed by
 // `- key: value` lines (status, milestone, labels, size, agent, depends) and free text. Plain
-// parsing, no model: the auditor gets the parsed list and the raw text both.
+// parsing, no model: the planner gets the parsed list and the raw text both.
 
 export interface RoadmapItem {
   id: string;            // RM-012

@@ -4,7 +4,7 @@ import { parse, stringify } from 'yaml';
 import { z } from 'zod';
 
 // An upstream the repo's data is built from. The bot compares what the repo pins with
-// what upstream has now and hands the difference to the auditor.
+// what upstream has now and hands the difference to the research run.
 const Source = z.object({
   name: z.string(),
   // github: a repository whose pinned commit is read from `pinned_from` (a 40-hex sha near the repo name).
@@ -43,7 +43,7 @@ const RepoConfig = z.object({
   // Appended to every PR body when set ('' = none; the repo may state AI use once in its docs instead).
   agent_disclosure: z.string().default(''),
   // Project conventions the agents must follow beyond what they read in the repo. Also the
-  // reviewer's checklist and part of what the auditor measures the repo against.
+  // reviewer's checklist and part of what the planner measures the repo against.
   notes: z.string().default(''),
   // Bot accounts whose inline review comments count as feedback, e.g. "github-actions[bot]".
   review_bots: z.array(z.string()).default([]),
@@ -52,23 +52,20 @@ const RepoConfig = z.object({
   after_commit: z.array(z.string()).default([]),
   signoff: z.boolean().default(false),
   // --- maintainer role ---
-  // Roadmap the auditor reads (items `### RM-NNN · scope: title` with a `- status:` line); '' when none.
+  // Roadmap the planner reads (items `### RM-NNN · scope: title` with a `- status:` line); '' when none.
   roadmap_file: z.string().default(''),
   // Conventional Commits types/scopes the repo's PR lint accepts; the PR title is checked before opening.
   pr_types: z.array(z.string()).default([]),
   pr_scopes: z.array(z.string()).default([]),
-  // Files the auditor gets in full (rules, docs, API surface) besides the roadmap; relative to the repo.
+  // Files the planner gets in full (rules, docs, API surface) besides the roadmap; relative to the repo.
   audit_files: z.array(z.string()).default(['README.md', 'CONTRIBUTING.md', 'AGENTS.md']),
   sources: z.array(Source).default([]),
   // none: the change may not touch dependencies. existing: it may add a dependency the repo
   // already uses somewhere (any package.json), or one listed in allowed_dependencies.
   dependencies: z.enum(['none', 'existing']).default('none'),
   allowed_dependencies: z.array(z.string()).default([]),
-  // Packages the project publishes, for the traction numbers the auditor weighs (npm names).
+  // Packages the project publishes, for the traction numbers the planner weighs (npm names).
   packages: z.array(z.string()).default([]),
-  // Proposals an agent can implement become issues assigned to the maintainer right away;
-  // only the ones that need a person wait on the dashboard.
-  auto_approve: z.boolean().default(false),
 });
 
 const Config = z.object({
@@ -85,9 +82,8 @@ const Config = z.object({
   push_via: z.enum(['git', 'api']).default('git'),
   repos: z.array(RepoConfig).default([]),
   limits: z.object({
-    // Issues the bot works on at once per repo (an open PR does not hold a slot).
-    max_in_flight_per_repo: z.number().default(1),
-    max_triage_per_run: z.number().default(5),
+    // The only limit on how much the bot works: open PRs plus issues being worked on, per repo.
+    max_open_prs: z.number().default(10),
     // A run stops before cloning or building when the disk holding work/ has less free space.
     min_free_disk_gb: z.number().default(15),
     // After each run the least recently used Go build output is dropped while the cache is past this (modules stay).
@@ -98,7 +94,7 @@ const Config = z.object({
     max_cost_per_call_usd: z.number().default(3),
     // No agent runs once this month's recorded spend reaches it (0: no limit); the dashboard says so.
     max_cost_per_month_usd: z.number().default(0),
-    // A higher cap for some agents (the deep audit's steps), by agent name.
+    // A higher cap for some agents (the research steps), by agent name.
     per_agent_usd: z.record(z.string(), z.number()).default({}),
   }),
   sandbox: z.object({
@@ -117,7 +113,7 @@ const Config = z.object({
     // token `gh` uses on the host.
     auth_env: z.enum(['COPILOT_GITHUB_TOKEN', 'ANTHROPIC_API_KEY', 'CLAUDE_CODE_OAUTH_TOKEN']).default('COPILOT_GITHUB_TOKEN'),
     model: z.string().optional(),
-    // Per agent: a stronger model and more reasoning where judgement matters (research, the audit).
+    // Per agent: a stronger model and more reasoning where judgement matters (the research steps, the planner).
     models: z.record(z.string(), z.string()).default({}),
     reasoning: z.record(z.string(), z.enum(['none', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max'])).default({}),
     cache_volume: z.string().default('maintainer-bot-cache'),

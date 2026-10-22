@@ -1,8 +1,8 @@
 # maintainer-bot
 
-Keeps your **own** open-source repositories moving. It audits a repo for what is missing or
-inconsistent and proposes issues; you approve them; it implements each one (failing test
-first, then the change), runs the repo's own gate, has an adversarial reviewer agent check
+Keeps your **own** open-source repositories moving. Twice a day it researches the project (the
+web, a newcomer's tryout, a code review) into a running list, decides what to do next and opens
+the issues; every hour it implements them (failing test first, then the change), runs the repo's own gate, has an adversarial reviewer agent check
 the result, and opens the pull request on the repo itself. It also watches the upstream data
 sources a repo pins, follows up on its open PRs, and drafts replies to other people's issues
 and reviews of their PRs. You merge.
@@ -12,15 +12,17 @@ comments. Nothing on GitHub marks the bot's work; state AI use once in the repo'
 CONTRIBUTING (`agent_disclosure` adds a line per PR if you want one).
 
 Sibling of `oss-bot` (same pipeline; copied, not shared). oss-bot works on other people's
-repos and asks before every post; maintainer-bot works on yours, so the only approval is
-**the issue**: what gets filed is your call, the PR for an approved issue opens on its own.
+repos and asks before every post; maintainer-bot works on yours, so it opens issues and PRs on
+its own. You merge, tick the research list, and decide drafted replies to other people.
 
 ## Pipeline
 
 ```
-sources ─(watch)─▶ upstream digest ─┐
-repo mirror ─(auditor)──────────────┴▶ proposal p<n> ─(/approve p<n>)─▶ GitHub issue, assigned to you
-open issue assigned to you ─▶ claimed ─▶ reproduced ─▶ coded ─▶ gated ─▶ reviewed ─▶ pr_open ─(you merge)─▶ done
+research: closed issues ─▶ items ticked; researcher + tryout + inspector ─▶ new items r<n> on the list
+          sources ─(watch)─▶ upstream digest ─┐
+          research list ─(planner)────────────┴▶ GitHub issues (assigned to you unless only a person can do it)
+audit:    open issue assigned to you, while open PRs + work in progress < max_open_prs (10)
+          ─▶ claimed ─▶ reproduced ─▶ coded ─▶ gated ─▶ reviewed ─▶ pr_open ─(you merge)─▶ done
                            when it gives up: a short comment on the issue says why, and it is listed on the dashboard
 open PR: CI failed / review comments / behind base ─(followup agent)─▶ drafted fix, reply or rebase ─(/approve a<n>)─▶ pushed
 someone else's issue ─(maintainer-triage)─▶ draft d<n>: labels + reply ─(/approve d<n> [--take])─▶ posted [+ assigned to you → pipeline]
@@ -39,8 +41,8 @@ The bot runs inside the repository it maintains, as a reusable workflow. Nothing
 your machine; you decide on a pinned **Maintainer Dashboard** issue, from the phone if you like.
 
 ```
-event (issue assigned to you, review comment, CI failed, a /command on the dashboard)  → pass
-schedules (the caller's crons) → research (web, newcomer tryout, code inspection) or audit
+event (issue assigned to you, review comment, CI failed, a /command on the dashboard)  → audit
+schedules (the caller's crons) → research (twice a day) or audit (hourly)
 outside bot.hours (e.g. "9-21" in bot.timezone) a run stops at once, unless started by hand
   ▼
 agent job    read-only token + the model credential → agents, gate, reviewer → state file
@@ -100,12 +102,12 @@ npm run -s maintainer-bot -- inbox
 
 | Command | What it does |
 | --- | --- |
-| `run` | follow up open PRs → other people's issues/PRs → pick up open issues assigned to you → advance → open PRs |
+| `run` (`audit`) | follow up open PRs → other people's issues/PRs → work open issues assigned to you, up to `max_open_prs` → open PRs |
 | `take <n> [--repo R]` | assign issue #n to you; the next run implements it |
 | `run --repo R --issue N [--dry]` | one issue; `--dry` stops after review, `approve <id>` then opens the PR |
 | `run --triage-only` | scoring only |
-| `research [--repo R]` | web research, newcomer tryout, code inspection; the next audit reads the findings |
-| `audit [--repo R]`, `watch` | sources + auditor now / sources only |
+| `research [--repo R]` | tick done items, research into the list, plan the issues to open next |
+| `watch` | upstream sources only |
 | `inbox [--refresh]`, `show <id>`, `cost` | what needs you; one item in full; spend by agent |
 | `approve p<n> [--no-edit]` / `reject p<n> [reason]` | file or drop a proposal |
 | `approve d<n> [--take] [--request-changes]` / `reject d<n>` | post or drop a drafted triage reply / PR review |

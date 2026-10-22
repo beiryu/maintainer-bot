@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { layoutSummary, testCounts } from '../src/audit.js';
+import { layoutSummary, testCounts } from '../src/plan.js';
 import { branchFor, checkPrTitle, pickReason, withMaintainerComments } from '../src/orchestrator.js';
 import { markDone, parseRoadmap, rmIdFromTitle, roadmapSummary } from '../src/roadmap.js';
 import { lineDiff, pinnedSha } from '../src/watch.js';
@@ -87,7 +87,7 @@ describe('checkPrTitle', () => {
   });
 });
 
-describe('audit context', () => {
+describe('planner context', () => {
   it('folds the file list into directories with counts', () => {
     const out = layoutSummary(['README.md', 'packages/core/src/a.ts', 'packages/core/src/b.ts', 'packages/cli/src/x.ts', 'tests/a.test.ts']);
     expect(out).toContain('(root)  1 file');

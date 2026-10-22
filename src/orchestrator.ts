@@ -4,7 +4,7 @@ import { appendFileSync, closeSync, existsSync, openSync, readSync, mkdirSync, r
 import { homedir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { AgentError, fillTemplate, runAgent, safeTestVars } from './agent.js';
-import { labelsFor, runAudit, runResearch } from './audit.js';
+import { labelsFor, runResearch } from './plan.js';
 import { type Config, repoConfig, type RepoConfig, repoOwner } from './config.js';
 import type { Db, Issue, PendingAction, Pr, Proposal } from './db.js';
 import { housekeeping } from './housekeeping.js';
@@ -52,9 +52,10 @@ export function withLock<T>(fn: () => Promise<T>, lock = 'data/run.lock'): Promi
 
 // ---------------------------------------------------------------- main loop
 
-// A run does one task: `pass` works PRs and issues; `research` (web, newcomer tryout, code
-// inspection) and `audit` (upstream sources + proposals) run on their own schedules.
-export type Task = 'pass' | 'research' | 'audit';
+// A run does one task. `audit` works the issues and PRs: follow-ups (CI, reviews, conflicts),
+// other people's issues and PRs, and as many open issues as fit under limits.max_open_prs.
+// `research` keeps the research list and opens the issues to work on next (see plan.ts).
+export type Task = 'audit' | 'research';
 export interface RunOpts { dry: boolean; repo?: string; issue?: number; triageOnly?: boolean; task?: Task }
 
 export async function runOnce(ctx: Ctx, opts: RunOpts) {
@@ -75,8 +76,10 @@ export async function runOnce(ctx: Ctx, opts: RunOpts) {
 
   const events: string[] = [];
   const heads = new Map<string, string>();
-  const task = opts.task ?? 'pass';
-  const pass = task === 'pass';
+  const task = opts.task ?? 'audit';
+  const pass = task === 'audit';
+  // Work stops being started past this point so the run ends (and saves its state) before the job's timeout.
+  const deadline = Date.now() + 85 * 60_000;
 
   for (const rc of cfg.repos) {
     if (opts.repo && rc.full_name !== opts.repo) continue;
@@ -123,21 +126,16 @@ export async function runOnce(ctx: Ctx, opts: RunOpts) {
     }
   }
 
-  // 3. Research or audit, when that is this run's task. Proposals wait in the inbox.
-  if (!pass) {
+  // 3. Research, when that is this run's task: the list, then the issues to open next.
+  if (task === 'research') {
     for (const rc of cfg.repos) {
       if (!active(rc.full_name) || (opts.repo && rc.full_name !== opts.repo)) continue;
       try {
-        if (task === 'research') {
-          await runResearch(ctx, rc, log);
-          events.push(`${rc.full_name}: research done`);
-        } else {
-          const digest = await sourceDigest(ctx, rc, log);
-          const added = await runAudit(ctx, rc, digest, log);
-          if (added.length) events.push(`${rc.full_name}: ${added.length} new proposal(s): ${added.map((p) => `p${p.id}`).join(', ')}`);
-        }
+        const digest = await sourceDigest(ctx, rc, log);
+        const r = await runResearch(ctx, rc, digest, log);
+        events.push(`${rc.full_name}: research: ${r.added.length} new item(s), ${r.planned.length} issue(s) to open`);
       } catch (e) {
-        events.push(`${rc.full_name}: ${task} failed: ${(e as Error).message.slice(0, 300)}`);
+        events.push(`${rc.full_name}: research failed: ${(e as Error).message.slice(0, 300)}`);
       }
     }
   }
@@ -151,7 +149,6 @@ export async function runOnce(ctx: Ctx, opts: RunOpts) {
     } else {
       for (const rc of cfg.repos) {
         if (!active(rc.full_name) || (opts.repo && rc.full_name !== opts.repo)) continue;
-        if (!opts.triageOnly && db.inFlightCount(rc.full_name) >= cfg.limits.max_in_flight_per_repo) continue;
         try {
           const e = await discoverAndTriage(ctx, rc, !!opts.triageOnly);
           if (e) events.push(e);
@@ -168,6 +165,7 @@ export async function runOnce(ctx: Ctx, opts: RunOpts) {
     : db.nextIssues(opts.repo);
   for (const issue of candidates) {
     if (!active(issue.repo)) continue;
+    if (Date.now() > deadline) { log(`#${issue.number}: left for the next run (this one is near its time limit)`); continue; }
     try {
       const e = await advance(ctx, issue.id);
       if (e) events.push(e);
@@ -202,13 +200,19 @@ export function triagePriority(issue: { title: string }): number {
 async function discoverAndTriage(ctx: Ctx, rc: RepoConfig, triageOnly = false): Promise<string | null> {
   const { cfg, db } = ctx;
 
-  // Already-triaged issues waiting for a free slot come first; re-check that they are still open.
-  for (const t of triageOnly ? [] : db.issuesInState('triaged', rc.full_name).sort((a, b) => (b.score ?? 0) - (a.score ?? 0))) {
-    const gi = await gh.getIssue(rc.full_name, t.number);
-    const why = await unavailable(rc, gi);
-    if (why) { db.skip(t.id, why); continue; }
-    return promote(ctx, rc, t);
-  }
+  // The only limit: open PRs plus issues being worked on stay within max_open_prs.
+  const room = () => cfg.limits.max_open_prs - db.openPrCount(rc.full_name) - db.inFlightCount(rc.full_name);
+  const promoteQueued = async () => {
+    for (const t of db.issuesInState('triaged', rc.full_name).sort((a, b) => (b.score ?? 0) - (a.score ?? 0))) {
+      if (room() <= 0) return;
+      const why = await unavailable(rc, await gh.getIssue(rc.full_name, t.number));
+      if (why) { db.skip(t.id, why); continue; }
+      await promote(ctx, rc, t);
+    }
+  };
+  // Already-triaged issues waiting for room come first; re-check that they are still open.
+  if (!triageOnly) await promoteQueued();
+  if (!triageOnly && room() <= 0) return null;
 
   const issues = await gh.listOpenIssues(rc.full_name, rc.labels);
   db.markScanned(rc.full_name);
@@ -224,19 +228,15 @@ async function discoverAndTriage(ctx: Ctx, rc: RepoConfig, triageOnly = false): 
   log(`${rc.full_name}: ${issues.length} open issues, ${fresh.length} new candidates` +
     (Object.keys(passed).length ? ` (passed over: ${Object.entries(passed).map(([k, v]) => `${v} ${k}`).join(', ')})` : ''));
 
-  let best: Issue | null = null;
   const scored: Issue[] = [];
   for (const issue of [...fresh, ...db.issuesInState('discovered', rc.full_name)]
     .filter((v, i, a) => a.findIndex((x) => x.id === v.id) === i)
-    .sort((a, b) => triagePriority(b) - triagePriority(a) || b.number - a.number)
-    .slice(0, triageOnly ? undefined : cfg.limits.max_triage_per_run)) { // --triage-only scores the whole queue
+    .sort((a, b) => triagePriority(b) - triagePriority(a) || b.number - a.number)) {
     if (!fresh.includes(issue)) {
       const why = await unavailable(rc, await gh.getIssue(rc.full_name, issue.number));
       if (why) { db.skip(issue.id, why); continue; }
     }
-    const t = await triage(ctx, rc, issue);
-    scored.push(t);
-    if (t.state === 'triaged' && (!best || (t.score ?? 0) > (best.score ?? 0))) best = t;
+    scored.push(await triage(ctx, rc, issue));
   }
   if (triageOnly) {
     if (!scored.length) return `${rc.full_name}: nothing new to triage`;
@@ -245,7 +245,8 @@ async function discoverAndTriage(ctx: Ctx, rc: RepoConfig, triageOnly = false): 
       .map((t) => `  ${t.state === 'triaged' ? '      ' : '[no]  '}${(t.score ?? 0).toFixed(2)} #${t.number} (id ${t.id}) ${t.title.slice(0, 70)}`)
       .join('\n');
   }
-  return best ? promote(ctx, rc, best) : null;
+  await promoteQueued();
+  return null;
 }
 
 /**
@@ -744,12 +745,18 @@ export async function approveProposal(ctx: Ctx, id: number, opts: { edit: boolea
     if (!title || !body) throw new Error('empty title or body; nothing filed');
   }
   const labels = await labelsFor(rc, JSON.parse(p.labels));
-  // Assigned to the maintainer: that is what makes it work for the next run.
+  // Work only a person can do is filed for them, outside the pipeline.
+  if (p.rationale.startsWith('[needs you]')) {
+    const created = await gh.createIssue(p.repo, { title, body, labels });
+    db.updateProposal(id, { status: 'filed', title, body, issue_number: created.number });
+    return `opened #${created.number} (needs you)`;
+  }
+  // Assigned to the maintainer: that is what makes the audit runs work on it.
   const created = await gh.createIssue(p.repo, { title, body, labels, assignees: [cfg.github_user] });
   db.insertDiscovered({ repo: p.repo, number: created.number, title, body, url: created.url });
   const issue = db.issueByNumber(p.repo, created.number)!;
-  // The maintainer just approved it: no triage, straight into the pipeline.
-  db.transition(issue.id, 'claimed', { score: 1, triage_reason: p.rationale });
+  // No triage: it waits in the queue for room under max_open_prs.
+  db.transition(issue.id, 'triaged', { score: 1, triage_reason: p.rationale });
   db.updateProposal(id, { status: 'filed', title, body, issue_number: created.number, issue_id: issue.id });
   return `opened #${created.number}, assigned to you`;
 }

@@ -6,13 +6,15 @@ import type { Proposal } from './db.js';
 import { freshClone, git, mirrorDir, slug } from './git.js';
 import * as gh from './github.js';
 import type { Ctx } from './orchestrator.js';
-import { addFindings, itemsForAgents, type ResearchItem, researchItems, type ResearchSource, updateItems } from './research.js';
+import { addFindings, itemsForAgents, type ResearchItem, researchItems, tickClosed, updateItems } from './research.js';
 import { parseRoadmap, roadmapSummary } from './roadmap.js';
 
-// The auditor reads the repo and proposes issues. Everything it gets is gathered here by
-// plain code; it decides nothing on its own, and the human decides on every proposal.
+// The research job: what the project needs next, as a running list and as issues. Everything the
+// agents get is gathered here by plain code.
 
-const untrusted = (s: string) => s.replace(/<\/?(untrusted|rules|roadmap|open_issues|open_prs|previous_proposals|research|known)/gi, '&lt;$1').slice(0, 40_000);
+const untrusted = (s: string, max = 40_000) => s.replace(/<\/?(untrusted|rules|roadmap|open_issues|open_prs|previous_proposals|research|known)/gi, '&lt;$1').slice(0, max);
+// The research list grows without a cap; agents read it whole.
+const LIST_MAX = 400_000;
 
 /** `git ls-files` folded into "dir/ (n files)" lines, two levels deep, so the agent sees the shape without the noise. */
 export function layoutSummary(paths: string[]): string {
@@ -90,81 +92,88 @@ export async function gatherAuditContext(ctx: Ctx, rc: RepoConfig, sourceDigest:
 const norm = (t: string) => t.toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim();
 
 /**
- * The research job: three agents look at the project before the auditor does. Research outside
- * the repo (web), try it as a newcomer, inspect the code. A step that fails is reported, not
- * fatal. What they find is added to the research list; nothing is overwritten.
+ * The research job, twice a day. In order:
+ *   1. tick the list items whose issue was closed;
+ *   2. three agents look at the project (web research, a newcomer's tryout, a code review) with
+ *      the whole list in hand, and what they find that is not on it yet is added;
+ *   3. the planner decides what to work on next and writes it as issues, as many as are worth
+ *      doing. The publish step files them: assigned to the maintainer (so the audit runs work
+ *      on them) unless only a person can do the work.
+ * A step that fails is reported, not fatal.
  */
-export async function runResearch(ctx: Ctx, rc: RepoConfig, log: (m: string) => void = console.log): Promise<ResearchItem[]> {
+export async function runResearch(ctx: Ctx, rc: RepoConfig, sourceDigest = '', log: (m: string) => void = console.log): Promise<{ added: ResearchItem[]; planned: Proposal[] }> {
   const { db } = ctx;
-  log(`${rc.full_name}: research`);
+  const repo = rc.full_name;
+  log(`${repo}: research`);
+  const ticked = await tickClosed(db, repo, async (n) => (await gh.getIssue(repo, n)).state !== 'OPEN');
+  if (ticked) log(`${repo}: ${ticked} item(s) done, their issue closed`);
+
   const notes = rc.notes.trim() ? `Project conventions:\n${rc.notes.trim()}` : '';
-  const a = await gatherAuditContext(ctx, rc, '');
+  const a = await gatherAuditContext(ctx, rc, sourceDigest);
+  const issueOf = (p: number) => { const n = db.proposal(p).issue_number; return n ? `#${n}` : undefined; };
   // Everything already known, so a run looks elsewhere instead of finding the same things again.
   const known = untrusted([
-    `The research list so far (r<n>, with its state):\n${itemsForAgents(researchItems(db, rc.full_name))}`,
+    `The research list so far (r<n>, with its state):\n${itemsForAgents(researchItems(db, repo), { issueOf })}`,
     `Open issues:\n${a.open_issues}`, `Open pull requests:\n${a.open_prs}`,
-    `Proposals already made, with the owner's decision:\n${a.previous}`, `Recent commits:\n${a.recent_commits}`,
-  ].join('\n\n'));
-  const vars = { repo: rc.full_name, default_branch: rc.default_branch, repo_notes: notes, traction: a.traction, known };
-  const head = await git(mirrorDir(rc.full_name), ['rev-parse', 'HEAD']);
+    `Issues already planned, with the owner's decision:\n${a.previous}`, `Recent commits:\n${a.recent_commits}`,
+  ].join('\n\n'), LIST_MAX);
+  const vars = { repo, default_branch: rc.default_branch, repo_notes: notes, traction: a.traction, known };
+  const head = await git(mirrorDir(repo), ['rev-parse', 'HEAD']);
   const scratch = async (name: string) => {
-    const dir = join('work', slug(rc.full_name), `_audit-${name}`);
-    await freshClone(rc.full_name, head, dir);
+    const dir = join('work', slug(repo), `_research-${name}`);
+    await freshClone(repo, head, dir);
     return dir;
   };
   const added: ResearchItem[] = [];
-  const step = async (agent: 'researcher' | 'tryout' | 'inspector', source: ResearchSource, workdir: () => Promise<string>, readOnly: boolean) => {
-    log(`${rc.full_name}: research step ${agent}`);
+  const step = async (agent: 'researcher' | 'tryout' | 'inspector', workdir: () => Promise<string>, readOnly: boolean) => {
+    log(`${repo}: research step ${agent}`);
     try {
       const r = await runAgent(ctx, { agent, issueId: null, workdir: await workdir(), readOnly, vars });
-      added.push(...addFindings(db, rc.full_name, source, r.findings, new Date().toISOString()));
-    } catch (e) { log(`${rc.full_name}: ${agent} failed: ${(e as Error).message.split('\n')[0]}`); }
+      added.push(...addFindings(db, repo, r.findings, new Date().toISOString()));
+    } catch (e) { log(`${repo}: ${agent} failed: ${(e as Error).message.split('\n')[0]}`); }
   };
-  await step('researcher', 'web', async () => mirrorDir(rc.full_name), true);
-  await step('tryout', 'tryout', () => scratch('tryout'), false);
-  await step('inspector', 'code', () => scratch('inspector'), false);
-  db.set(`researched:${rc.full_name}`, JSON.stringify({ at: new Date().toISOString(), added: added.length }));
-  log(`${rc.full_name}: research done, ${added.length} new item(s)`);
-  return added;
+  await step('researcher', async () => mirrorDir(repo), true);
+  await step('tryout', () => scratch('tryout'), false);
+  await step('inspector', () => scratch('inspector'), false);
+  log(`${repo}: ${added.length} new item(s)`);
+
+  const planned = await plan(ctx, rc, { ...a, research: untrusted(itemsForAgents(researchItems(db, repo), { issueOf }), LIST_MAX) }, log);
+  db.set(`researched:${repo}`, JSON.stringify({ at: new Date().toISOString(), added: added.length, planned: planned.length }));
+  return { added, planned };
 }
 
 /**
- * Runs the auditor once for a repo and stores its proposals. It reads the whole research list
- * (open items first, the ones new since the last audit marked) and ticks or links items.
- * Proposals whose title matches a pending/filed one are skipped.
+ * The planner: from the research list and the state of the repo, the issues to work on next.
+ * Each becomes a proposal the publish step files right away; items are linked to it or ticked.
  */
-export async function runAudit(ctx: Ctx, rc: RepoConfig, sourceDigest = '', log: (m: string) => void = console.log): Promise<Proposal[]> {
+async function plan(ctx: Ctx, rc: RepoConfig, vars: Record<string, string>, log: (m: string) => void): Promise<Proposal[]> {
   const { db } = ctx;
-  log(`${rc.full_name}: audit`);
-  const vars = await gatherAuditContext(ctx, rc, sourceDigest);
-  const last = db.get(`audited:${rc.full_name}`) ?? undefined;
-  vars.research = untrusted(itemsForAgents(researchItems(db, rc.full_name), { since: last }));
-  vars.since = last ? `The last audit was at ${last.slice(0, 16).replace('T', ' ')} UTC.` : 'This is the first audit.';
-  const r = await runAgent(ctx, { agent: 'auditor', issueId: null, workdir: mirrorDir(rc.full_name), readOnly: true, vars });
-  const known = new Set([...db.proposals('pending', rc.full_name), ...db.proposals('filed', rc.full_name), ...db.proposals('approved', rc.full_name)]
+  const repo = rc.full_name;
+  log(`${repo}: plan`);
+  const r = await runAgent(ctx, { agent: 'planner', issueId: null, workdir: mirrorDir(repo), readOnly: true, vars });
+  const known = new Set([...db.proposals('pending', repo), ...db.proposals('filed', repo), ...db.proposals('approved', repo)]
     .map((p) => norm(p.title)));
-  const added: Proposal[] = [];
-  for (const p of r.proposals) {
-    if (known.has(norm(p.title))) { log(`  (already proposed) ${p.title}`); continue; }
+  const filed: Proposal[] = [];
+  for (const p of r.issues) {
+    if (known.has(norm(p.title))) { log(`  (already planned) ${p.title}`); continue; }
     const id = db.addProposal({
-      repo: rc.full_name, kind: p.kind, title: p.title.trim(), body: p.body, labels: JSON.stringify(p.labels),
-      rationale: p.rationale, evidence: JSON.stringify(p.evidence), covers_issue: p.covers_issue, covers_rm: p.covers_rm,
-      run_id: ctx.runId,
+      repo, kind: p.kind, title: p.title.trim(), body: p.body, labels: JSON.stringify(p.labels),
+      rationale: p.agent_suitable ? p.rationale : `[needs you] ${p.rationale}`, evidence: JSON.stringify(p.evidence),
+      covers_issue: null, covers_rm: p.covers_rm, run_id: ctx.runId,
     });
-    if (!p.agent_suitable) db.updateProposal(id, { rationale: `[needs you] ${p.rationale}` });
-    else if (rc.auto_approve && !p.covers_issue) db.set(`auto-approve:${id}`, '1');
-    added.push(db.proposal(id));
+    db.set(`auto-approve:${id}`, '1');
+    filed.push(db.proposal(id));
     known.add(norm(p.title));
-    if (p.findings.length) updateItems(db, rc.full_name, p.findings, (i) => { i.proposal = id; });
+    if (p.findings.length) updateItems(db, repo, p.findings, (i) => { i.proposal = id; });
   }
-  for (const x of r.resolved) updateItems(db, rc.full_name, [x.id], (i) => { i.done = true; i.note = x.why; });
-  db.set(`audited:${rc.full_name}`, new Date().toISOString());
-  if (r.summary) db.set(`audit-summary:${rc.full_name}`, r.summary.slice(0, 2000));
-  log(`${rc.full_name}: ${added.length} new proposal(s) of ${r.proposals.length}`);
-  return added;
+  for (const x of r.covered) updateItems(db, repo, [x.id], (i) => { i.issue = x.issue; });
+  for (const x of r.resolved) updateItems(db, repo, [x.id], (i) => { i.done = true; i.note = x.why; });
+  if (r.summary) db.set(`plan-summary:${repo}`, r.summary.slice(0, 2000));
+  log(`${repo}: ${filed.length} issue(s) to open`);
+  return filed;
 }
 
-/** Labels the auditor proposed, restricted to what the repo actually has; never process labels like `agent: …`. */
+/** Labels the planner proposed, restricted to what the repo actually has; never process labels like `agent: …`. */
 export async function labelsFor(rc: RepoConfig, proposed: string[]): Promise<string[]> {
   const existing = new Set(await repoLabels(rc.full_name));
   return [...new Set(proposed)].filter((l) => existing.has(l) && !/^agent\b/i.test(l));

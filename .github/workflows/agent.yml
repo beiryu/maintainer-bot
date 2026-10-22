@@ -11,8 +11,8 @@
 #            account), runs the maintainer's /commands from the dashboard and answers each,
 #            renders the dashboard issue and saves the state on the branch maintainer-bot/state.
 #
-# Every event runs a pass (PRs and issues). Research (web, newcomer tryout, code inspection)
-# and the audit run only when the caller passes `task`, from its own schedules. Outside the
+# Every event runs the audit (issues and PRs, up to max_open_prs). Research (web, newcomer
+# tryout, code review, then the issues to open next) runs when the caller passes `task: research`. Outside the
 # config's working hours (`bot.hours`) a run stops after reading the config, unless started by
 # hand; the next run in hours picks up what came in meanwhile. The dashboard is written by the bot only and its edits
 # start no run (callers do not subscribe to `issues: edited`): decisions come as comments.
@@ -22,9 +22,9 @@ on:
   workflow_call:
     inputs:
       task:
-        description: "pass (PRs and issues), research (web, newcomer tryout, code inspection) or audit (sources + proposals)"
+        description: "audit (issues and PRs) or research (the research list and the issues to open next)"
         type: string
-        default: pass
+        default: audit
       draft_prs:
         description: open pull requests as drafts (for a pilot)
         type: boolean
@@ -116,7 +116,7 @@ jobs:
         env:
           MODEL_TOKEN: ${{ secrets.COPILOT_TOKEN || secrets.MODEL_TOKEN }}
           AUTH_ENV: ${{ steps.cfg.outputs.auth_env }}
-          TASK: ${{ inputs.task || 'pass' }}
+          TASK: ${{ inputs.task || 'audit' }}
         run: |
           export "$AUTH_ENV=$MODEL_TOKEN"; unset MODEL_TOKEN
           cd "$BOT" && npm run -s maintainer-bot -- --state "$STATE" ci agent --repo "$GITHUB_REPOSITORY" --bot-config repo-config.yml --task "$TASK"

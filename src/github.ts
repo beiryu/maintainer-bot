@@ -411,7 +411,7 @@ export async function prCommentsSince(repo: string, number: number, since: strin
     .sort((a, b) => a.createdAt.localeCompare(b.createdAt));
 }
 
-/** What the auditor weighs product work against. Each part is optional: traffic needs push access. */
+/** What the planner weighs product work against. Each part is optional: traffic needs push access. */
 export async function traction(repo: string, npmPackages: string[] = []): Promise<string> {
   const out: string[] = [];
   const tryJson = async <T>(args: string[]) => { try { return await ghJson<T>(args); } catch { return null; } };

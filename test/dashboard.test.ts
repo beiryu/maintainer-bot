@@ -1,9 +1,9 @@
 import { describe, expect, it } from 'vitest';
 import { DASHBOARD_MARK, dashboardChanged, itemComment, parseCommands, parseCommandTitle, pendingItems, renderDashboard } from '../src/dashboard.js';
 import { Db } from '../src/db.js';
-import { addFindings, tickedIds, updateItems } from '../src/research.js';
+import { addFindings, researchItems, tickClosed, tickedIds, updateItems } from '../src/research.js';
 
-const cfg = { repos: [{ full_name: 'o/r', sources: [] }], limits: { max_in_flight_per_repo: 1 }, budget: { max_cost_per_call_usd: 3 } } as never;
+const cfg = { repos: [{ full_name: 'o/r', sources: [] }], limits: { max_open_prs: 10 }, budget: { max_cost_per_call_usd: 3 } } as never;
 
 function populated() {
   const db = new Db(':memory:');
@@ -22,26 +22,40 @@ function populated() {
 }
 
 describe('renderDashboard', () => {
-  it('lists research items like a roadmap: a checkbox each, open first, grouped by source', () => {
+  it('lists research items like a roadmap: a checkbox each, open first, linked to their issue', () => {
     const db = new Db(':memory:');
     db.upsertRepo('o/r');
     expect(renderDashboard(db, cfg, { repo: 'o/r' })).not.toContain('### Research');
-    addFindings(db, 'o/r', 'web', [{ title: 'Not in the MCP Registry', detail: 'Search returned 0. Publishing needs a server.json.', evidence: ['https://registry.example/x?q=1'] }], '2026-10-22T13:10:00Z');
-    addFindings(db, 'o/r', 'code', [{ title: 'CCCD year 2300', detail: 'parseCitizenId accepts it.', evidence: ['src/id.ts:46'] }, { title: 'tlv counts UTF-16', detail: 'Not bytes.', evidence: [] }], '2026-10-22T13:12:00Z');
+    addFindings(db, 'o/r', [{ title: 'Not in the MCP Registry', detail: 'Search returned 0. Publishing needs a server.json.', evidence: ['https://registry.example/x?q=1'] }], '2026-10-22T13:10:00Z');
+    addFindings(db, 'o/r', [{ title: 'CCCD year 2300', detail: 'parseCitizenId accepts it.', evidence: ['src/id.ts:46'] }, { title: 'tlv counts UTF-16', detail: 'Not bytes.', evidence: [] }], '2026-10-22T13:12:00Z');
+    const p = db.addProposal({ repo: 'o/r', kind: 'bug', title: 'tlv: count bytes', body: 'b', labels: '[]', rationale: 'r', evidence: '[]', covers_issue: null, covers_rm: null, run_id: null });
+    db.updateProposal(p, { status: 'filed', issue_number: 120 });
     updateItems(db, 'o/r', [2], (i) => { i.done = true; i.note = '#95 fixed it'; });
-    updateItems(db, 'o/r', [3], (i) => { i.proposal = 7; });
-    db.set('researched:o/r', JSON.stringify({ at: '2026-10-22T13:12:30Z', added: 2 }));
-    const body = renderDashboard(db, cfg, { repo: 'o/r', now: Date.parse('2026-10-23T00:00:00Z') });
-    expect(body).toContain('_2 open · 1 done · last run 2026-10-22 13:12 UTC, 2 new. Tick what is done._');
-    expect(body).toContain('**Web**\n\n- [ ] r1 **Not in the MCP Registry**: Search returned 0. · [source](https://registry.example/x?q=1) · 22/10');
-    expect(body).toContain('**Code**\n\n- [ ] r3 **tlv counts UTF-16**: Not bytes. · → p7 · 22/10\n- [x] r2 **CCCD year 2300**: parseCitizenId accepts it. · #95 fixed it · 22/10');
+    updateItems(db, 'o/r', [3], (i) => { i.proposal = p; });
+    updateItems(db, 'o/r', [1], (i) => { i.issue = 69; });
+    db.set('researched:o/r', JSON.stringify({ at: '2026-10-22T13:12:30Z', added: 2, planned: 1 }));
+    const body = renderDashboard(db, cfg, { repo: 'o/r' });
+    expect(body).toContain('_2 open · 1 done · last run 2026-10-22 13:12 UTC: 2 new, 1 issue(s) opened. Tick what is done._');
+    expect(body).toContain([
+      '- [ ] r1 **Not in the MCP Registry**: Search returned 0. · → [#69](https://github.com/o/r/issues/69) · [source](https://registry.example/x?q=1) · 22/10',
+      '- [ ] r3 **tlv counts UTF-16**: Not bytes. · → [#120](https://github.com/o/r/issues/120) · 22/10',
+      '- [x] r2 **CCCD year 2300**: parseCitizenId accepts it. · #95 fixed it · 22/10',
+    ].join('\n'));
     expect(body).not.toContain('<details>');
   });
   it('reads the ticks on the dashboard and never adds the same title twice', () => {
     expect(tickedIds('- [x] r3 **a**\n- [ ] r4 **b**\n  - [X] r12 **c**\n- [x] p5 not research')).toEqual([3, 12]);
     const db = new Db(':memory:');
-    expect(addFindings(db, 'o/r', 'web', [{ title: 'Same thing', detail: 'a', evidence: [] }], 't1')).toHaveLength(1);
-    expect(addFindings(db, 'o/r', 'code', [{ title: 'same  THING!', detail: 'b', evidence: [] }, { title: 'Other', detail: 'c', evidence: [] }], 't2').map((i) => i.id)).toEqual([2]);
+    expect(addFindings(db, 'o/r', [{ title: 'Same thing', detail: 'a', evidence: [] }], 't1')).toHaveLength(1);
+    expect(addFindings(db, 'o/r', [{ title: 'same  THING!', detail: 'b', evidence: [] }, { title: 'Other', detail: 'c', evidence: [] }], 't2').map((i) => i.id)).toEqual([2]);
+  });
+  it('ticks items whose issue was closed', async () => {
+    const db = new Db(':memory:');
+    addFindings(db, 'o/r', [{ title: 'a', detail: '', evidence: [] }, { title: 'b', detail: '', evidence: [] }], 't');
+    updateItems(db, 'o/r', [1], (i) => { i.issue = 7; });
+    updateItems(db, 'o/r', [2], (i) => { i.issue = 8; });
+    expect(await tickClosed(db, 'o/r', async (n) => n === 7)).toBe(1);
+    expect(researchItems(db, 'o/r').map((i) => [i.done, i.note])).toEqual([[true, '#7 closed'], [false, '']]);
   });
   it('lists every decision with the command that approves it, one line each, and the rest as status', () => {
     const { db, a, p, d1, d2 } = populated();
