@@ -9,7 +9,6 @@ bot:
     max_cost_per_month_usd: 100    # the bot stops for the month at this spend
   limits:
     max_attempts: 3
-    audit_interval_hours: 168      # audit at most weekly (the schedule in the workflow triggers it)
 
 default_branch: main
 branch_name: "{{type}}/{{number}}-{{slug}}"

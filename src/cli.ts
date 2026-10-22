@@ -3,7 +3,7 @@ import { Command } from 'commander';
 import { randomUUID } from 'node:crypto';
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
-import { runAudit } from './audit.js';
+import { runAudit, runResearch } from './audit.js';
 import { ciAgent, ciConfig, ciPublish, deskRepo, pullState, pushState, setupOutputs, STATE_BRANCH } from './ci.js';
 import { loadConfig, repoConfig } from './config.js';
 import { doctor } from './doctor.js';
@@ -42,24 +42,36 @@ const days = (d: number) => new Date(Date.now() - d * 86_400_000).toISOString();
 const log = (m: string) => console.log(`${new Date().toISOString()} ${m}`);
 
 program.command('run')
-  .description('one pass: follow up open PRs, audit (when due), pick up issues labelled for the bot, advance the pipeline, open PRs')
+  .description('one pass: follow up open PRs, pick up issues labelled for the bot, advance the pipeline, open PRs')
   .option('--dry', 'work on an issue without touching GitHub (no labels, no comments, no PR)')
   .option('--repo <owner/name>')
   .option('--issue <number>', 'work on this issue only (needs --repo)', Number)
-  .option('--triage-only', 'score every open issue; no follow-ups, no audit, no code')
-  .option('--no-audit', 'skip the audit this run')
-  .option('--audit-only', 'only check sources and audit; no follow-ups, no code')
+  .option('--triage-only', 'score every open issue; no follow-ups, no code')
   .action(async (o) => {
     if (o.issue && !o.repo) throw new Error('--issue needs --repo');
     if (o.issue && o.triageOnly) throw new Error('--triage-only scores issues; it does not take --issue');
     const c = ctx(randomUUID());
     await withLock(() => runOnce(c, {
       dry: !!o.dry, repo: o.repo, issue: o.issue, triageOnly: !!o.triageOnly,
-      audit: o.auditOnly ? 'only' : o.audit === false ? 'skip' : 'auto',
     }), c.cfg.lock_file);
   });
 
-program.command('audit').description('check upstream sources and run the auditor now; proposals land in the inbox')
+program.command('research').description('research the web, try the project as a newcomer, inspect the code; the next audit reads the findings')
+  .option('--repo <owner/name>')
+  .action(async (o) => {
+    const c = ctx(randomUUID());
+    await withLock(async () => {
+      for (const rc of c.cfg.repos) {
+        if (o.repo && rc.full_name !== o.repo) continue;
+        const { ensureMirror } = await import('./git.js');
+        c.db.upsertRepo(rc.full_name);
+        await ensureMirror(rc.full_name, rc.default_branch);
+        await runResearch(c, rc, log);
+      }
+    }, c.cfg.lock_file);
+  });
+
+program.command('audit').description('check upstream sources and run the auditor now (with the last research findings); proposals land in the inbox')
   .option('--repo <owner/name>')
   .action(async (o) => {
     const c = ctx(randomUUID());
@@ -290,11 +302,13 @@ ciOpts(ci.command('state-pull')).description('write the state branch\'s state.js
     writeFileSync(state, `${JSON.stringify(json ?? new Db(':memory:').exportJson(), null, 1)}\n`);
     console.log(head ? `state from ${STATE_BRANCH} @ ${head.slice(0, 10)}` : 'no state branch yet; starting empty');
   });
-ciOpts(ci.command('agent')).description('one pass with read access only: agents, gate, review; PRs wait for `ci publish`')
+ciOpts(ci.command('agent')).description('one task with read access only: a pass (agents, gate, review; PRs wait for `ci publish`), research or audit')
   .option('--dry', 'work on issues without preparing PRs')
+  .option('--task <task>', 'pass | research | audit', 'pass')
   .action(async (o) => {
+    if (!['pass', 'research', 'audit'].includes(o.task)) throw new Error(`--task must be pass, research or audit (got "${o.task}")`);
     const c = ciCtx(o, false);
-    await ciAgent(c, { repo: o.repo, dry: !!o.dry });
+    await ciAgent(c, { repo: o.repo, dry: !!o.dry, task: o.task });
   });
 ciOpts(ci.command('publish')).description('with the maintainer\'s token: run the dashboard /commands, open ready PRs, render the dashboard, save the state branch')
   .option('--event <file>', 'the GitHub event payload ($GITHUB_EVENT_PATH)')

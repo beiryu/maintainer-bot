@@ -2,7 +2,7 @@ import { existsSync, readFileSync, statSync } from 'node:fs';
 import { join } from 'node:path';
 import { type AgentResult, runAgent } from './agent.js';
 import type { RepoConfig } from './config.js';
-import type { Db, Proposal } from './db.js';
+import type { Proposal } from './db.js';
 import { freshClone, git, mirrorDir, slug } from './git.js';
 import * as gh from './github.js';
 import type { Ctx } from './orchestrator.js';
@@ -88,20 +88,22 @@ export async function gatherAuditContext(ctx: Ctx, rc: RepoConfig, sourceDigest:
 
 const norm = (t: string) => t.toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim();
 
-/**
- * Runs the auditor once for a repo and stores its proposals. Proposals whose title matches a
- * pending/filed one, or that the agent itself says an open issue covers, are kept but marked.
- */
 type Findings = AgentResult<'researcher'>;
 const renderFindings = (f: Findings | null, what: string) => !f ? `(${what} did not run)`
   : `${f.summary}\n\n${f.findings.map((x) => `- ${x.title}: ${x.detail}${x.evidence.length ? `\n  evidence: ${x.evidence.join(' | ').slice(0, 1500)}` : ''}`).join('\n') || '(no findings)'}`;
 
+/** What the last research run found, as the auditor reads it. */
+interface Research { at: string; research: string; tryout: string; inspection: string }
+
 /**
- * The deep audit's first three steps, each its own agent: research outside the repo (web),
- * try the project as a newcomer, inspect the code. A step that fails is reported, not fatal.
+ * The research job: three agents look at the project before the auditor does. Research outside
+ * the repo (web), try it as a newcomer, inspect the code. A step that fails is reported, not
+ * fatal. The findings are kept in the state for the next audit.
  */
-async function deepSteps(ctx: Ctx, rc: RepoConfig, traction: string, log: (m: string) => void) {
+export async function runResearch(ctx: Ctx, rc: RepoConfig, log: (m: string) => void = console.log): Promise<Research> {
+  log(`${rc.full_name}: research`);
   const notes = rc.notes.trim() ? `Project conventions:\n${rc.notes.trim()}` : '';
+  const traction = untrusted(await gh.traction(rc.full_name, rc.packages));
   const base = { repo: rc.full_name, default_branch: rc.default_branch, repo_notes: notes, traction };
   const head = await git(mirrorDir(rc.full_name), ['rev-parse', 'HEAD']);
   const scratch = async (name: string) => {
@@ -110,27 +112,42 @@ async function deepSteps(ctx: Ctx, rc: RepoConfig, traction: string, log: (m: st
     return dir;
   };
   const step = async (agent: 'researcher' | 'tryout' | 'inspector', workdir: () => Promise<string>, readOnly: boolean) => {
-    log(`${rc.full_name}: audit step ${agent}`);
+    log(`${rc.full_name}: research step ${agent}`);
     try { return await runAgent(ctx, { agent, issueId: null, workdir: await workdir(), readOnly, vars: base }); }
     catch (e) { log(`${rc.full_name}: ${agent} failed: ${(e as Error).message.split('\n')[0]}`); return null; }
   };
   const research = await step('researcher', async () => mirrorDir(rc.full_name), true);
   const tryout = await step('tryout', () => scratch('tryout'), false);
   const inspection = await step('inspector', () => scratch('inspector'), false);
-  return { research, tryout, inspection };
+  const r: Research = {
+    at: new Date().toISOString(),
+    research: renderFindings(research, 'research'),
+    tryout: renderFindings(tryout, 'the newcomer tryout'),
+    inspection: renderFindings(inspection, 'the code inspection'),
+  };
+  ctx.db.set(`research:${rc.full_name}`, JSON.stringify(r));
+  const n = [research, tryout, inspection].reduce((k, f) => k + (f?.findings.length ?? 0), 0);
+  log(`${rc.full_name}: research done, ${n} finding(s)`);
+  return r;
 }
 
+/**
+ * Runs the auditor once for a repo and stores its proposals. It reads the last research run's
+ * findings, whenever that was. Proposals whose title matches a pending/filed one are skipped.
+ */
 export async function runAudit(ctx: Ctx, rc: RepoConfig, sourceDigest = '', log: (m: string) => void = console.log): Promise<Proposal[]> {
   const { db } = ctx;
   log(`${rc.full_name}: audit`);
   const vars = await gatherAuditContext(ctx, rc, sourceDigest);
-  if (rc.deep_audit) {
-    const d = await deepSteps(ctx, rc, vars.traction, log);
-    vars.research = untrusted(renderFindings(d.research, 'research'));
-    vars.tryout = untrusted(renderFindings(d.tryout, 'the newcomer tryout'));
-    vars.inspection = untrusted(renderFindings(d.inspection, 'the code inspection'));
+  const saved = db.get(`research:${rc.full_name}`);
+  if (saved) {
+    const r = JSON.parse(saved) as Research;
+    const when = `(from the research run of ${r.at.slice(0, 16).replace('T', ' ')} UTC)\n`;
+    vars.research = untrusted(when + r.research);
+    vars.tryout = untrusted(when + r.tryout);
+    vars.inspection = untrusted(when + r.inspection);
   } else {
-    vars.research = vars.tryout = vars.inspection = '(not run: deep_audit is off)';
+    vars.research = vars.tryout = vars.inspection = '(no research run yet)';
   }
   const r = await runAgent(ctx, { agent: 'auditor', issueId: null, workdir: mirrorDir(rc.full_name), readOnly: true, vars });
   const known = new Set([...db.proposals('pending', rc.full_name), ...db.proposals('filed', rc.full_name), ...db.proposals('approved', rc.full_name)]
@@ -152,12 +169,6 @@ export async function runAudit(ctx: Ctx, rc: RepoConfig, sourceDigest = '', log:
   if (r.summary) db.set(`audit-summary:${rc.full_name}`, r.summary.slice(0, 2000));
   log(`${rc.full_name}: ${added.length} new proposal(s) of ${r.proposals.length}`);
   return added;
-}
-
-/** Hours since the last audit of a repo, or Infinity. */
-export function hoursSinceAudit(db: Db, repo: string): number {
-  const t = db.get(`audited:${repo}`);
-  return t ? (Date.now() - new Date(t).getTime()) / 3_600_000 : Infinity;
 }
 
 /** Labels the auditor proposed, restricted to what the repo actually has; never process labels like `agent: …`. */

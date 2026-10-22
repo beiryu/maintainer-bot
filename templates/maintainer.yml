@@ -17,8 +17,14 @@ on:
   pull_request_target:
     types: [opened, synchronize]             # other people's PRs: reviewed from the diff and CI, never run
   schedule:
-    - cron: '0 2 * * *'                      # daily 09:00 Vietnam: upstream sources + audit
+    - cron: '0 1 * * *'                      # research: web, newcomer tryout, code inspection (08:00 Vietnam)
+    - cron: '0 2 * * *'                      # audit: upstream sources + proposals, with the research findings (09:00 Vietnam)
   workflow_dispatch:
+    inputs:
+      task:
+        type: choice
+        options: [pass, research, audit]
+        default: pass
 
 # The most GITHUB_TOKEN may do in the called workflow: its agent job reads with these, its
 # publish job uses the maintainer's PAT and asks for nothing.
@@ -45,6 +51,8 @@ jobs:
     # Pinned to a commit: that revision of the bot is what runs with the secrets (Dependabot bumps it).
     uses: beiryu/maintainer-bot/.github/workflows/agent.yml@0000000000000000000000000000000000000000 # v1
     with:
+      # Each schedule is one task; keep these crons in step with the ones above.
+      task: ${{ github.event.schedule == '0 1 * * *' && 'research' || github.event.schedule == '0 2 * * *' && 'audit' || inputs.task || 'pass' }}
       draft_prs: true                        # pilot: PRs open as drafts; set false once trusted
     # MAINTAINER_TOKEN lives in the environment "bot", which only the called workflow's publish job
     # enters; inherit is the only way an environment secret reaches a called workflow.

@@ -6,7 +6,7 @@ import { type Command, DASHBOARD_MARK, dashboardChanged, dashboardTitle, itemCom
 import type { Db, StateJson } from './db.js';
 import { ensureMirror } from './git.js';
 import * as gh from './github.js';
-import { approveFollowup, approveProposal, type Ctx, openPr, rejectProposal, replyText, runOnce, STOP_MARK, withMaintainerComments } from './orchestrator.js';
+import { approveFollowup, approveProposal, type Ctx, openPr, rejectProposal, replyText, runOnce, STOP_MARK, type Task, withMaintainerComments } from './orchestrator.js';
 import { approveDraft } from './outside.js';
 
 // The bot on GitHub Actions. One workflow run = one pass, in two jobs:
@@ -34,7 +34,7 @@ const BotBlock = z.object({
   setup: z.array(z.string()).default([]),
   budget: z.object({ max_cost_per_call_usd: z.number().optional(), max_cost_per_month_usd: z.number().optional(), per_agent_usd: z.record(z.string(), z.number()).optional() }).default({}),
   limits: z.object({
-    max_attempts: z.number().optional(), max_triage_per_run: z.number().optional(), audit_interval_hours: z.number().optional(),
+    max_attempts: z.number().optional(), max_triage_per_run: z.number().optional(),
   }).default({}),
   agent_timeout_min: z.number().optional(),
   gate_timeout_min: z.number().optional(),
@@ -114,7 +114,7 @@ export async function pushState(repo: string, json: StateJson, previous: { json:
 const monthStart = () => { const d = new Date(); return new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), 1)).toISOString(); };
 
 /** One pass without write access: everything up to "PR ready", drafts and proposals into the state. */
-export async function ciAgent(ctx: Ctx, opts: { repo: string; dry: boolean }) {
+export async function ciAgent(ctx: Ctx, opts: { repo: string; dry: boolean; task: Task }) {
   const { cfg, db } = ctx;
   gh.assumeUser(cfg.github_user);
   db.upsertRepo(opts.repo);
@@ -126,9 +126,8 @@ export async function ciAgent(ctx: Ctx, opts: { repo: string; dry: boolean }) {
   }
   db.set('budget-exhausted', null);
   ctx.deferActions = true;
-  // The cron is the audit cadence: a scheduled run always audits, other runs only when one is overdue.
-  const audit = process.env.GITHUB_EVENT_NAME === 'schedule' ? 'due' : 'auto';
-  await runOnce(ctx, { dry: opts.dry, repo: opts.repo, audit });
+  // The caller's workflow picks the task: its schedules run research and audit, every other event a pass.
+  await runOnce(ctx, { dry: opts.dry, repo: opts.repo, task: opts.task });
 }
 
 // ---------------------------------------------------------------- publish job

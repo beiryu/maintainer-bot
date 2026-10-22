@@ -9,7 +9,6 @@ repos: []
 limits:
   max_in_flight_per_repo: 1
   max_triage_per_run: 5
-  audit_interval_hours: 24      # `maintainer-bot audit` ignores this
   max_attempts: 3
   max_go_build_cache_gb: 6
 

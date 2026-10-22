@@ -64,8 +64,6 @@ const RepoConfig = z.object({
   // already uses somewhere (any package.json), or one listed in allowed_dependencies.
   dependencies: z.enum(['none', 'existing']).default('none'),
   allowed_dependencies: z.array(z.string()).default([]),
-  // Before the auditor: research the web, try the project as a newcomer, inspect the code (three more agent calls).
-  deep_audit: z.boolean().default(false),
   // Packages the project publishes, for the traction numbers the auditor weighs (npm names).
   packages: z.array(z.string()).default([]),
   // Proposals an agent can implement become issues assigned to the maintainer right away;
@@ -90,8 +88,6 @@ const Config = z.object({
     // Issues the bot works on at once per repo (an open PR does not hold a slot).
     max_in_flight_per_repo: z.number().default(1),
     max_triage_per_run: z.number().default(5),
-    // The auditor runs at most this often per repo; `audit` on the command line ignores it.
-    audit_interval_hours: z.number().default(24),
     // A run stops before cloning or building when the disk holding work/ has less free space.
     min_free_disk_gb: z.number().default(15),
     // After each run the least recently used Go build output is dropped while the cache is past this (modules stay).

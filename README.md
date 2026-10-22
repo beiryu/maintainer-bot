@@ -39,7 +39,8 @@ The bot runs inside the repository it maintains, as a reusable workflow. Nothing
 your machine; you decide on a pinned **Maintainer Dashboard** issue, from the phone if you like.
 
 ```
-event (issue assigned to you, review comment, CI failed, daily schedule, a /command on the dashboard)
+event (issue assigned to you, review comment, CI failed, a /command on the dashboard)  → pass
+schedule 01:00 UTC → research (web, newcomer tryout, code inspection) · 02:00 UTC → audit
   ▼
 agent job    read-only token + the model credential → agents, gate, reviewer → state file
   ▼
@@ -98,10 +99,11 @@ npm run -s maintainer-bot -- inbox
 
 | Command | What it does |
 | --- | --- |
-| `run` | follow up open PRs → other people's issues/PRs → watch sources + audit (when due) → pick up open issues assigned to you → advance → open PRs |
+| `run` | follow up open PRs → other people's issues/PRs → pick up open issues assigned to you → advance → open PRs |
 | `take <n> [--repo R]` | assign issue #n to you; the next run implements it |
 | `run --repo R --issue N [--dry]` | one issue; `--dry` stops after review, `approve <id>` then opens the PR |
-| `run --triage-only` / `--no-audit` / `--audit-only` | scoring only / skip or isolate the audit |
+| `run --triage-only` | scoring only |
+| `research [--repo R]` | web research, newcomer tryout, code inspection; the next audit reads the findings |
 | `audit [--repo R]`, `watch` | sources + auditor now / sources only |
 | `inbox [--refresh]`, `show <id>`, `cost` | what needs you; one item in full; spend by agent |
 | `approve p<n> [--no-edit]` / `reject p<n> [reason]` | file or drop a proposal |

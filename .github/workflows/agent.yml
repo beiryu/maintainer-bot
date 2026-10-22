@@ -11,13 +11,18 @@
 #            account), runs the maintainer's /commands from the dashboard and answers each,
 #            renders the dashboard issue and saves the state on the branch maintainer-bot/state.
 #
-# Every event runs the whole pass. The dashboard is written by the bot only and its edits
+# Every event runs a pass (PRs and issues). Research (web, newcomer tryout, code inspection)
+# and the audit run only when the caller passes `task`, from its own schedules. The dashboard is written by the bot only and its edits
 # start no run (callers do not subscribe to `issues: edited`): decisions come as comments.
 name: maintainer-bot
 
 on:
   workflow_call:
     inputs:
+      task:
+        description: "pass (PRs and issues), research (web, newcomer tryout, code inspection) or audit (sources + proposals)"
+        type: string
+        default: pass
       draft_prs:
         description: open pull requests as drafts (for a pilot)
         type: boolean
@@ -95,9 +100,10 @@ jobs:
         env:
           MODEL_TOKEN: ${{ secrets.COPILOT_TOKEN || secrets.MODEL_TOKEN }}
           AUTH_ENV: ${{ steps.cfg.outputs.auth_env }}
+          TASK: ${{ inputs.task || 'pass' }}
         run: |
           export "$AUTH_ENV=$MODEL_TOKEN"; unset MODEL_TOKEN
-          cd "$BOT" && npm run -s maintainer-bot -- --state "$STATE" ci agent --repo "$GITHUB_REPOSITORY" --bot-config repo-config.yml
+          cd "$BOT" && npm run -s maintainer-bot -- --state "$STATE" ci agent --repo "$GITHUB_REPOSITORY" --bot-config repo-config.yml --task "$TASK"
       - name: Hand over the state
         if: always()
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2

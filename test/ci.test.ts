@@ -17,7 +17,7 @@ bot:
   runtime: copilot
   setup: [node@22, pnpm@12.11.2]
   budget: { max_cost_per_month_usd: 100 }
-  limits: { audit_interval_hours: 168 }
+  limits: { max_attempts: 5 }
 focused_test: "pnpm vitest run {{file}}"
 gate: ["pnpm test"]
 pr_scopes: [core]
@@ -27,8 +27,7 @@ pr_scopes: [core]
     expect(cfg.sandbox.mode).toBe('runner');
     expect(cfg.sandbox.auth_env).toBe('COPILOT_GITHUB_TOKEN');
     expect(cfg.budget).toEqual({ max_cost_per_call_usd: 3, max_cost_per_month_usd: 100, per_agent_usd: {} });
-    expect(cfg.limits.audit_interval_hours).toBe(168);
-    expect(cfg.limits.max_attempts).toBe(3);
+    expect(cfg.limits.max_attempts).toBe(5);
     expect(cfg.repos[0].full_name).toBe('beiryu/vn-skills');
     expect(cfg.repos[0].gate).toEqual(['pnpm test']);
     expect(cfg.repos[0].pr_scopes).toEqual(['core']);

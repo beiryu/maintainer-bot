@@ -4,7 +4,7 @@ import { appendFileSync, closeSync, existsSync, openSync, readSync, mkdirSync, r
 import { homedir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { AgentError, fillTemplate, runAgent, safeTestVars } from './agent.js';
-import { hoursSinceAudit, labelsFor, runAudit } from './audit.js';
+import { labelsFor, runAudit, runResearch } from './audit.js';
 import { type Config, repoConfig, type RepoConfig, repoOwner } from './config.js';
 import type { Db, Issue, PendingAction, Pr, Proposal } from './db.js';
 import { housekeeping } from './housekeeping.js';
@@ -52,7 +52,10 @@ export function withLock<T>(fn: () => Promise<T>, lock = 'data/run.lock'): Promi
 
 // ---------------------------------------------------------------- main loop
 
-export interface RunOpts { dry: boolean; repo?: string; issue?: number; triageOnly?: boolean; audit?: 'auto' | 'skip' | 'only' | 'due' }
+// A run does one task: `pass` works PRs and issues; `research` (web, newcomer tryout, code
+// inspection) and `audit` (upstream sources + proposals) run on their own schedules.
+export type Task = 'pass' | 'research' | 'audit';
+export interface RunOpts { dry: boolean; repo?: string; issue?: number; triageOnly?: boolean; task?: Task }
 
 export async function runOnce(ctx: Ctx, opts: RunOpts) {
   const { cfg, db } = ctx;
@@ -72,7 +75,8 @@ export async function runOnce(ctx: Ctx, opts: RunOpts) {
 
   const events: string[] = [];
   const heads = new Map<string, string>();
-  const audit = opts.audit ?? 'auto';
+  const task = opts.task ?? 'pass';
+  const pass = task === 'pass';
 
   for (const rc of cfg.repos) {
     if (opts.repo && rc.full_name !== opts.repo) continue;
@@ -84,7 +88,7 @@ export async function runOnce(ctx: Ctx, opts: RunOpts) {
   const active = (r: string) => db.repo(r)?.status === 'active' && heads.has(r);
 
   // 1. Follow-up on open PRs first.
-  for (const pr of opts.triageOnly || audit === 'only' ? [] : db.openPrs()) {
+  for (const pr of opts.triageOnly || !pass ? [] : db.openPrs()) {
     if (!active(pr.repo)) continue;
     try {
       const e = await followUp(ctx, pr.issue_id);
@@ -95,7 +99,7 @@ export async function runOnce(ctx: Ctx, opts: RunOpts) {
   }
 
   // Issues the bot stopped on that were closed some other way (fixed by hand, dropped) leave the inbox.
-  for (const i of opts.triageOnly || audit === 'only' ? [] : db.issuesInState('skipped')) {
+  for (const i of opts.triageOnly || !pass ? [] : db.issuesInState('skipped')) {
     if (!active(i.repo) || !db.get(`handed-back:${i.id}`)) continue;
     try {
       if ((await gh.getIssue(i.repo, i.number)).state !== 'OPEN') {
@@ -106,7 +110,7 @@ export async function runOnce(ctx: Ctx, opts: RunOpts) {
   }
 
   // 2. Other people's new issues and PRs: draft a triage reply / review for the inbox.
-  if (!opts.triageOnly && !opts.issue && audit !== 'only' && !opts.dry) {
+  if (pass && !opts.triageOnly && !opts.issue && !opts.dry) {
     for (const rc of cfg.repos) {
       if (!active(rc.full_name) || (opts.repo && rc.full_name !== opts.repo)) continue;
       for (const step of [triageOutsideIssues, reviewOutsidePrs]) {
@@ -119,23 +123,27 @@ export async function runOnce(ctx: Ctx, opts: RunOpts) {
     }
   }
 
-  // 3. Audit: what changed upstream, then what the repo is missing. Proposals wait in the inbox.
-  if (!opts.triageOnly && !opts.issue && audit !== 'skip') {
+  // 3. Research or audit, when that is this run's task. Proposals wait in the inbox.
+  if (!pass) {
     for (const rc of cfg.repos) {
       if (!active(rc.full_name) || (opts.repo && rc.full_name !== opts.repo)) continue;
-      if (audit === 'auto' && hoursSinceAudit(db, rc.full_name) < cfg.limits.audit_interval_hours) continue;
       try {
-        const digest = await sourceDigest(ctx, rc, log);
-        const added = await runAudit(ctx, rc, digest, log);
-        if (added.length) events.push(`${rc.full_name}: ${added.length} new proposal(s): ${added.map((p) => `p${p.id}`).join(', ')}`);
+        if (task === 'research') {
+          await runResearch(ctx, rc, log);
+          events.push(`${rc.full_name}: research done`);
+        } else {
+          const digest = await sourceDigest(ctx, rc, log);
+          const added = await runAudit(ctx, rc, digest, log);
+          if (added.length) events.push(`${rc.full_name}: ${added.length} new proposal(s): ${added.map((p) => `p${p.id}`).join(', ')}`);
+        }
       } catch (e) {
-        events.push(`${rc.full_name}: audit failed: ${(e as Error).message.slice(0, 300)}`);
+        events.push(`${rc.full_name}: ${task} failed: ${(e as Error).message.slice(0, 300)}`);
       }
     }
   }
 
   // 4. Find work: a specific issue, or the open issues labelled for the bot.
-  if (audit !== 'only') {
+  if (pass) {
     if (opts.issue && opts.repo) {
       if (!active(opts.repo)) throw new Error(`${opts.repo} is not active`);
       const e = await targetIssue(ctx, repoConfig(cfg, opts.repo), opts.issue, opts.dry);
@@ -155,7 +163,7 @@ export async function runOnce(ctx: Ctx, opts: RunOpts) {
   }
 
   // 5. Advance in-progress issues.
-  const candidates = opts.triageOnly || audit === 'only' ? [] : opts.issue && opts.repo
+  const candidates = opts.triageOnly || !pass ? [] : opts.issue && opts.repo
     ? [db.issueByNumber(opts.repo, opts.issue)].filter((i): i is Issue => !!i)
     : db.nextIssues(opts.repo);
   for (const issue of candidates) {
