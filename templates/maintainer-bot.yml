@@ -4,6 +4,8 @@
 bot:
   runtime: copilot                 # copilot | claude; COPILOT_TOKEN is the matching credential
   setup: [node@22, pnpm@12.11.2]   # toolchains installed before the gate: node@X, pnpm@X, go@X, uv
+  hours: "9-21"                    # works 09:00–21:00 only (a run by hand always works)
+  timezone: Asia/Ho_Chi_Minh
   budget:
     max_cost_per_call_usd: 3       # Copilot AI credits at $0.01 each
     max_cost_per_month_usd: 100    # the bot stops for the month at this spend

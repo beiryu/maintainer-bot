@@ -17,8 +17,8 @@ on:
   pull_request_target:
     types: [opened, synchronize]             # other people's PRs: reviewed from the diff and CI, never run
   schedule:
-    - cron: '0 1 * * *'                      # research: web, newcomer tryout, code inspection (08:00 Vietnam)
-    - cron: '0 2 * * *'                      # audit: upstream sources + proposals, with the research findings (09:00 Vietnam)
+    - cron: '0 2,8 * * *'                    # research: web, newcomer tryout, code inspection (09:00 and 15:00 Vietnam)
+    - cron: '30 2-13 * * *'                  # audit: upstream sources + proposals, hourly 09:30–20:30 Vietnam
   workflow_dispatch:
     inputs:
       task:
@@ -52,7 +52,8 @@ jobs:
     uses: beiryu/maintainer-bot/.github/workflows/agent.yml@0000000000000000000000000000000000000000 # v1
     with:
       # Each schedule is one task; keep these crons in step with the ones above.
-      task: ${{ github.event.schedule == '0 1 * * *' && 'research' || github.event.schedule == '0 2 * * *' && 'audit' || inputs.task || 'pass' }}
+      # Different minutes: a run that waits in the concurrency group is replaced by the next one.
+      task: ${{ github.event.schedule == '0 2,8 * * *' && 'research' || github.event.schedule == '30 2-13 * * *' && 'audit' || inputs.task || 'pass' }}
       draft_prs: true                        # pilot: PRs open as drafts; set false once trusted
     # MAINTAINER_TOKEN lives in the environment "bot", which only the called workflow's publish job
     # enters; inherit is the only way an environment secret reaches a called workflow.

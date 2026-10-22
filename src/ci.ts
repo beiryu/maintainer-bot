@@ -38,7 +38,19 @@ const BotBlock = z.object({
   }).default({}),
   agent_timeout_min: z.number().optional(),
   gate_timeout_min: z.number().optional(),
+  // Working hours "9-21" (from 09:00 to 21:00) in `timezone`: outside them a run stops after reading
+  // the config. Nothing is lost: the next run in hours picks up dashboard commands and open work.
+  hours: z.string().regex(/^\d{1,2}-\d{1,2}$/).optional(),
+  timezone: z.string().default('UTC'),
 });
+
+/** Whether `now` falls in working hours "from-to" (hours of the day in `timezone`); always true without hours. */
+export function withinHours(hours: string | undefined, timezone: string, now = new Date()): boolean {
+  if (!hours) return true;
+  const [from, to] = hours.split('-').map(Number);
+  const h = Number(new Intl.DateTimeFormat('en-GB', { hour: '2-digit', hourCycle: 'h23', timeZone: timezone }).format(now));
+  return from! <= to! ? h >= from! && h < to! : h >= from! || h < to!;
+}
 
 /** The whole Config for one repo, from its `.github/maintainer-bot.yml`. */
 export function ciConfig(file: string, repo: string): Config {
@@ -68,7 +80,7 @@ export function deskRepo(file: string, repo: string): string {
 }
 
 /** `name=value` lines for $GITHUB_OUTPUT: what the workflow must install before the bot runs. */
-export function setupOutputs(file: string): string {
+export function setupOutputs(file: string, now = new Date()): string {
   const raw = (parse(readFileSync(file, 'utf8')) ?? {}) as { bot?: unknown };
   const bot = BotBlock.parse(raw.bot ?? {});
   const want = (name: string) => bot.setup.find((s) => s === name || s.startsWith(`${name}@`));
@@ -80,6 +92,7 @@ export function setupOutputs(file: string): string {
     `pnpm=${want('pnpm') ?? ''}`,
     `go=${want('go') ? version(want('go'), 'stable') : ''}`,
     `uv=${want('uv') ? 'true' : ''}`,
+    `open=${withinHours(bot.hours, bot.timezone, now)}`,
   ].join('\n');
 }
 

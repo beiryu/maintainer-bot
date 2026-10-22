@@ -40,7 +40,8 @@ your machine; you decide on a pinned **Maintainer Dashboard** issue, from the ph
 
 ```
 event (issue assigned to you, review comment, CI failed, a /command on the dashboard)  → pass
-schedule 01:00 UTC → research (web, newcomer tryout, code inspection) · 02:00 UTC → audit
+schedules (the caller's crons) → research (web, newcomer tryout, code inspection) or audit
+outside bot.hours (e.g. "9-21" in bot.timezone) a run stops at once, unless started by hand
   ▼
 agent job    read-only token + the model credential → agents, gate, reviewer → state file
   ▼
