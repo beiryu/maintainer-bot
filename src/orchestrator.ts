@@ -902,11 +902,13 @@ async function prepareRebase(ctx: Ctx, rc: RepoConfig, issue: Issue, pr: Pr, why
           + `The PR's current diff is in ${workPath(cfg, agentWork)}/${AGENT_META}/PATCH.diff. Re-apply that same change, including its test, onto the code now in ${workPath(cfg, agentWork)}. Choose "fix".`,
       },
     });
-    if (r.action !== 'fix') {
+    // The agent sometimes does the work and then answers with another action: the diff and the
+    // gate decide, unless it says it could not.
+    newPatch = r.action === 'human' || r.action === 'close' ? '' : await exportPatch(cfg, onNew).catch(() => '');
+    if (!newPatch.trim()) {
       await notify(cfg, `maintainer-bot: ${pr.url} conflicts with ${rc.default_branch} and the agent could not re-apply it:\n${r.message.slice(0, 800)}`);
       return `PR ${pr.url}: rebase needs you`;
     }
-    newPatch = await exportPatch(cfg, onNew);
     how = `the agent re-applied it: ${r.message}`;
   }
   const g = await runGate(cfg, rc, onNew, newPatch, log, { rebase: true });

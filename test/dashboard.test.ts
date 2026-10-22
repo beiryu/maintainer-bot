@@ -50,6 +50,17 @@ describe('renderDashboard', () => {
     // Nothing the bot writes reads as a command.
     expect(parseCommands(body)).toEqual([]);
   });
+  it('offers a retry link for a PR whose rebase gave up', () => {
+    const { db } = populated();
+    const issue = db.issueByNumber('o/r', 1)!.id;
+    db.updatePr(issue, { mergeable: 'CONFLICTING' });
+    db.set(`rebase-tried:${issue}`, 'abc');
+    expect(renderDashboard(db, cfg, { repo: 'o/r', desk: 'o/desk' })).not.toContain('my rebase did not get through'); // a fix is still pending
+    db.setActionStatus(db.pendingActionFor(issue)!.id, 'rejected');
+    const body = renderDashboard(db, cfg, { repo: 'o/r', desk: 'o/desk' });
+    expect(body).toMatch(/#20\]\(https:\/\/github.com\/o\/r\/pull\/20\) conflicts with the base and my rebase did not get through → \[🔁 Retry\]\(https:\/\/github.com\/o\/desk\/issues\/new\?title=/);
+    expect(parseCommands(body)).toEqual([]);
+  });
   it('says so when nothing waits, and warns about an expiring token', () => {
     const db = new Db(':memory:');
     const body = renderDashboard(db, cfg, { repo: 'o/r', tokenExpiry: '2026-10-30', now: Date.parse('2026-10-21T00:00:00Z') });

@@ -171,6 +171,12 @@ async function applyCommand(ctx: Ctx, repo: string, c: Command): Promise<string>
     else db.setDraftStatus(n, 'rejected');
     return `${c.id} rejected${c.reason ? `: ${c.reason}` : ''}`;
   }
+  // `/retry #<PR>`: try the rebase again on the current base.
+  const ownPr = c.cmd === 'retry' && db.openPrsWithIssue().find((p) => p.repo === repo && p.number === c.number);
+  if (ownPr) {
+    db.set(`rebase-tried:${ownPr.issue_id}`, null);
+    return `#${c.number} rebase will be tried again in the next run`;
+  }
   const issue = db.issueByNumber(repo, c.number);
   if (issue) {
     // Start from the issue as it reads now, with the maintainer's comments but not the stop notes.
@@ -324,7 +330,7 @@ export async function ciPublish(ctx: Ctx, opts: PublishOpts): Promise<string[]> 
   // 4. The dashboard.
   if (db.get('budget-exhausted')) notes.push(`⏸ This month's budget ($${cfg.budget.max_cost_per_month_usd}) is spent; no agent runs until next month.`);
   const body = renderDashboard(db, cfg, {
-    repo, runUrl: opts.runUrl, notes, monthCostUsd: db.costSince(monthStart()),
+    repo, desk, runUrl: opts.runUrl, notes, monthCostUsd: db.costSince(monthStart()),
     monthLimitUsd: cfg.budget.max_cost_per_month_usd || undefined, tokenExpiry: await gh.tokenExpiry(),
   });
   if (!dash) {

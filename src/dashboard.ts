@@ -55,6 +55,7 @@ export interface DashboardInfo {
   monthLimitUsd?: number;
   tokenExpiry?: string | null;
   notes?: string[];            // one-off lines for this render (an approval that failed, ...)
+  desk?: string;               // where command links open their issue
   now?: number;
 }
 
@@ -135,6 +136,11 @@ export function renderDashboard(db: Db, cfg: Config, info: DashboardInfo): strin
   const todo: string[] = pendingItems(db, repo).map((it) => `- ${it.line}`);
   for (const i of db.issuesInState('skipped').filter((i) => i.repo === repo && db.get(`handed-back:${i.id}`) && !i.skip_reason?.startsWith('rejected by human'))) {
     todo.push(`- ${iss(i.number)} stopped: ${esc((i.skip_reason ?? '').slice(0, 140))} → \`/retry #${i.number}\``);
+  }
+  // PRs whose rebase gave up on this base: one click tries again.
+  for (const p of db.openPrsWithIssue().filter((p) => p.repo === repo && p.mergeable === 'CONFLICTING' && db.get(`rebase-tried:${p.issue_id}`) && !db.pendingActionFor(p.issue_id))) {
+    const retry = info.desk ? commandLink('🔁 Retry', `/retry #${p.number}`, info.desk, repo) : `\`/retry #${p.number}\``;
+    todo.push(`- ${pr(p.number)} conflicts with the base and my rebase did not get through → ${retry}`);
   }
   const blocked = db.blockedIssues(repo);
   if (blocked.length) todo.push(`- gate broken on base: ${esc(blocked[0].blocked!)}`);
