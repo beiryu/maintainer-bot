@@ -62,7 +62,7 @@ export async function gatherAuditContext(ctx: Ctx, rc: RepoConfig, sourceDigest:
   let commits = '';
   try {
     const rows = await gh.ghJson<any[]>(['api', `repos/${rc.full_name}/commits?sha=${rc.default_branch}&per_page=30`]);
-    commits = rows.map((c) => `${c.sha.slice(0, 8)} ${c.commit.committer?.date?.slice(0, 10) ?? ''} ${c.commit.message.split('\n')[0]}`).join('\n');
+    commits = rows.map((c) => `${c.sha.slice(0, 8)} ${c.commit.committer?.date?.slice(0, 16).replace('T', ' ') ?? ''} ${c.commit.message.split('\n')[0]}`).join('\n');
   } catch { commits = '(unavailable)'; }
   const previous = [...db.proposals('pending', rc.full_name), ...db.proposals('rejected', rc.full_name), ...db.proposals('filed', rc.full_name)]
     .slice(-60)
@@ -139,6 +139,7 @@ export async function runAudit(ctx: Ctx, rc: RepoConfig, sourceDigest = '', log:
   const { db } = ctx;
   log(`${rc.full_name}: audit`);
   const vars = await gatherAuditContext(ctx, rc, sourceDigest);
+  const last = db.get(`audited:${rc.full_name}`);
   const saved = db.get(`research:${rc.full_name}`);
   if (saved) {
     const r = JSON.parse(saved) as Research;
@@ -146,8 +147,12 @@ export async function runAudit(ctx: Ctx, rc: RepoConfig, sourceDigest = '', log:
     vars.research = untrusted(when + r.research);
     vars.tryout = untrusted(when + r.tryout);
     vars.inspection = untrusted(when + r.inspection);
+    vars.since = !last ? 'This is the first audit.'
+      : r.at > last ? `The research is new since the last audit (${last.slice(0, 16).replace('T', ' ')} UTC).`
+      : `The last audit (${last.slice(0, 16).replace('T', ' ')} UTC) already read this research: only what changed since then is new.`;
   } else {
     vars.research = vars.tryout = vars.inspection = '(no research run yet)';
+    vars.since = last ? `The last audit was at ${last.slice(0, 16).replace('T', ' ')} UTC.` : 'This is the first audit.';
   }
   const r = await runAgent(ctx, { agent: 'auditor', issueId: null, workdir: mirrorDir(rc.full_name), readOnly: true, vars });
   const known = new Set([...db.proposals('pending', rc.full_name), ...db.proposals('filed', rc.full_name), ...db.proposals('approved', rc.full_name)]

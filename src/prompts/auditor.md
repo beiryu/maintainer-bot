@@ -68,9 +68,9 @@ Weigh what would move these, and say so in the rationale of product proposals.
 {{traction}}
 </traction>
 
-Three people looked at the project before you. Their findings are the strongest material you
-have: turn the ones that matter into proposals, check doubtful ones against the code, and
-cite them (with their URLs, commands and outputs) in the proposal's evidence.
+The research run looked at the project before you. Its findings are your main material: turn
+the ones that matter into proposals and cite them (with their URLs, commands and outputs) in
+the proposal's evidence. {{since}}
 
 Research outside the repository (web, with sources):
 <research>
@@ -100,26 +100,18 @@ repeat a rejected one unless something changed; do not repeat a pending one at a
 {{previous}}
 </previous_proposals>
 
-## What to look for
+## What to do
 
-Read the code, not just the documents. Typical findings, in no particular order:
+The heavy looking was done by the research run above: the web, a newcomer's tryout and a code
+review. Do not repeat it. Your job is light: turn what is new into proposals.
 
-- A function, command or tool documented (README, SKILL.md, docs) that behaves differently
-  in code, or is documented but missing, or exists but is undocumented.
-- The same capability exposed unevenly across the repo's surfaces (library vs CLI vs MCP vs
-  agent skill): an option, error or edge case handled in one and not the others.
-- Exports with no test, or tests that never hit a branch that matters for real users.
-- Data that drifted from its upstream (see upstream_changes) or from what the docs claim.
-- A roadmap item that is `planned` or `idea` with no open issue, which you can specify fully
-  from what is in the repository (no outside facts needed). Write it as the issue.
-- An open issue whose work is already done in the code (propose closing it, kind "consistency").
-- Product work: the next roadmap item or feature that matters most to users; what keeps a
-  newcomer from trying the project in five minutes (README, demo, examples, install paths);
-  where the project should be listed or packaged so its users find it (registries,
-  marketplaces, package indexes, curated lists); docs a user would search for and not find.
-  Work that only a person can do (posting, creating accounts, decisions, legal sources) is
-  still worth proposing: set agent_suitable=false and make the body a checklist they can
-  follow, with the exact text or links to use where possible.
+- What is new: research findings no earlier proposal covers, upstream changes, and what
+  happened since the last audit (new commits, issues, PRs, decisions on earlier proposals).
+- Open a file only to confirm a finding or to name the exact paths in a proposal. Do not
+  explore the repository on your own.
+- Nothing new is a normal answer: return an empty `proposals` list and say so in the summary.
+- Work only a person can do (posting, accounts, decisions, legal sources) is still worth
+  proposing: set agent_suitable=false and make the body a checklist they can follow.
 
 Rules that are stricter than usual because the implementer is a machine:
 

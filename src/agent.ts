@@ -29,7 +29,7 @@ const Findings = z.object({
 });
 
 export const AGENTS = {
-  // Deep audit, step 1: what is happening outside the repository. The only agent with the web.
+  // Research, step 1: what is happening outside the repository. The only agent with the web.
   researcher: { access: READ, web: true, maxTurns: 80, schema: Findings },
   // Step 2: uses the project the way a newcomer would, in a throwaway checkout.
   tryout: { access: WRITE, maxTurns: 80, schema: Findings },
@@ -74,9 +74,9 @@ export const AGENTS = {
     access: WRITE, maxTurns: 40,
     schema: z.object({ action: z.enum(['reply', 'fix', 'wait', 'close', 'human']), message: z.string() }),
   },
-  // Reads the whole repo (read-only) and proposes issues: gaps, inconsistencies, roadmap work.
+  // Turns the research findings and what changed since the last audit into proposals; light, runs often.
   auditor: {
-    access: READ, maxTurns: 40,
+    access: READ, maxTurns: 12,
     schema: z.object({
       proposals: z.array(z.object({
         title: z.string().max(120),
