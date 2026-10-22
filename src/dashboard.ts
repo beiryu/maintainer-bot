@@ -170,6 +170,14 @@ export function renderDashboard(db: Db, cfg: Config, info: DashboardInfo): strin
     for (const s of src) L.push(`- **${s.name}**: ${esc(s.digest!.split('\n')[0])}`);
     L.push('');
   }
+  // The last research run, folded: what the next audits work from.
+  const research = db.get(`research:${repo}`);
+  if (research) {
+    const r = JSON.parse(research) as { at: string; research: string; tryout: string; inspection: string };
+    L.push(`### Research · ${r.at.replace('T', ' ').slice(0, 16)} UTC`,
+      details('Web', r.research.slice(0, 15_000)), details('Newcomer tryout', r.tryout.slice(0, 15_000)),
+      details('Code', r.inspection.slice(0, 15_000)), '');
+  }
   L.push('---', 'Decide with the links on each item below. Also: `/retry #N` · `/take N` · `/pause` · `/resume`');
   return L.join('\n');
 }

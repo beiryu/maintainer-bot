@@ -21,6 +21,17 @@ function populated() {
 }
 
 describe('renderDashboard', () => {
+  it('folds the last research run under its time', () => {
+    const db = new Db(':memory:');
+    db.upsertRepo('o/r');
+    expect(renderDashboard(db, cfg, { repo: 'o/r' })).not.toContain('### Research');
+    db.set('research:o/r', JSON.stringify({ at: '2026-10-22T13:13:53.468Z', research: 'Not in the MCP Registry.\n\n- registry: count 0', tryout: 'Builds cleanly.', inspection: 'Sound.' }));
+    const body = renderDashboard(db, cfg, { repo: 'o/r' });
+    expect(body).toContain('### Research · 2026-10-22 13:13 UTC');
+    expect(body).toContain('<details><summary>Web</summary>\n\n  Not in the MCP Registry.\n\n  - registry: count 0');
+    expect(body).toContain('<details><summary>Newcomer tryout</summary>');
+    expect(body).toContain('<details><summary>Code</summary>');
+  });
   it('lists every decision with the command that approves it, one line each, and the rest as status', () => {
     const { db, a, p, d1, d2 } = populated();
     const body = renderDashboard(db, cfg, { repo: 'o/r', monthCostUsd: 1.25, monthLimitUsd: 50, now: Date.parse('2026-10-21T10:00:00Z') });
