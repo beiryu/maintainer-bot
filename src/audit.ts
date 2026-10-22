@@ -1,6 +1,6 @@
 import { existsSync, readFileSync, statSync } from 'node:fs';
 import { join } from 'node:path';
-import { type AgentResult, runAgent } from './agent.js';
+import { runAgent } from './agent.js';
 import type { RepoConfig } from './config.js';
 import type { Proposal } from './db.js';
 import { freshClone, git, mirrorDir, slug } from './git.js';
