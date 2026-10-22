@@ -11,7 +11,7 @@ import { parseRoadmap, roadmapSummary } from './roadmap.js';
 // The auditor reads the repo and proposes issues. Everything it gets is gathered here by
 // plain code; it decides nothing on its own, and the human decides on every proposal.
 
-const untrusted = (s: string) => s.replace(/<\/?(untrusted|rules|roadmap|open_issues|open_prs|previous_proposals|research|tryout|inspection)/gi, '&lt;$1').slice(0, 40_000);
+const untrusted = (s: string) => s.replace(/<\/?(untrusted|rules|roadmap|open_issues|open_prs|previous_proposals|research|tryout|inspection|known)/gi, '&lt;$1').slice(0, 40_000);
 
 /** `git ls-files` folded into "dir/ (n files)" lines, two levels deep, so the agent sees the shape without the noise. */
 export function layoutSummary(paths: string[]): string {
@@ -103,8 +103,17 @@ interface Research { at: string; research: string; tryout: string; inspection: s
 export async function runResearch(ctx: Ctx, rc: RepoConfig, log: (m: string) => void = console.log): Promise<Research> {
   log(`${rc.full_name}: research`);
   const notes = rc.notes.trim() ? `Project conventions:\n${rc.notes.trim()}` : '';
-  const traction = untrusted(await gh.traction(rc.full_name, rc.packages));
-  const base = { repo: rc.full_name, default_branch: rc.default_branch, repo_notes: notes, traction };
+  const a = await gatherAuditContext(ctx, rc, '');
+  const base = { repo: rc.full_name, default_branch: rc.default_branch, repo_notes: notes, traction: a.traction };
+  // What is already known, so a run looks elsewhere instead of finding the same things again.
+  const saved = ctx.db.get(`research:${rc.full_name}`);
+  const prev = saved ? JSON.parse(saved) as Research : null;
+  const known = (last: string | undefined) => untrusted([
+    prev ? `Your last run (${prev.at.slice(0, 16).replace('T', ' ')} UTC) found:\n${last}` : 'This is the first run.',
+    `Open issues:\n${a.open_issues}`, `Open pull requests:\n${a.open_prs}`,
+    `Proposals already made, with the owner's decision:\n${a.previous}`, `Recent commits:\n${a.recent_commits}`,
+  ].join('\n\n'));
+  const lastOf = { researcher: prev?.research, tryout: prev?.tryout, inspector: prev?.inspection };
   const head = await git(mirrorDir(rc.full_name), ['rev-parse', 'HEAD']);
   const scratch = async (name: string) => {
     const dir = join('work', slug(rc.full_name), `_audit-${name}`);
@@ -113,7 +122,7 @@ export async function runResearch(ctx: Ctx, rc: RepoConfig, log: (m: string) => 
   };
   const step = async (agent: 'researcher' | 'tryout' | 'inspector', workdir: () => Promise<string>, readOnly: boolean) => {
     log(`${rc.full_name}: research step ${agent}`);
-    try { return await runAgent(ctx, { agent, issueId: null, workdir: await workdir(), readOnly, vars: base }); }
+    try { return await runAgent(ctx, { agent, issueId: null, workdir: await workdir(), readOnly, vars: { ...base, known: known(lastOf[agent]) } }); }
     catch (e) { log(`${rc.full_name}: ${agent} failed: ${(e as Error).message.split('\n')[0]}`); return null; }
   };
   const research = await step('researcher', async () => mirrorDir(rc.full_name), true);
