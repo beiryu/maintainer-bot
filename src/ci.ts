@@ -126,7 +126,9 @@ export async function ciAgent(ctx: Ctx, opts: { repo: string; dry: boolean }) {
   }
   db.set('budget-exhausted', null);
   ctx.deferActions = true;
-  await runOnce(ctx, { dry: opts.dry, repo: opts.repo, audit: 'auto' });
+  // The cron is the audit cadence: a scheduled run always audits, other runs only when one is overdue.
+  const audit = process.env.GITHUB_EVENT_NAME === 'schedule' ? 'due' : 'auto';
+  await runOnce(ctx, { dry: opts.dry, repo: opts.repo, audit });
 }
 
 // ---------------------------------------------------------------- publish job
@@ -181,6 +183,8 @@ async function applyCommand(ctx: Ctx, repo: string, c: Command): Promise<string>
   if (c.cmd === 'take') await gh.assign(repo, c.number, cfg.github_user);
   return `#${c.number} ${c.cmd === 'take' ? 'assigned to you and ' : ''}back in the queue`;
 }
+
+const actionStatus = (db: Ctx['db'], id: string) => { try { return db.action(Number(id.slice(1))).status; } catch { return null; } };
 
 /** One readable line for a failure: a git/gh command line is noise, its exit code and stderr are not. */
 export function shortError(e: unknown): string {
@@ -275,7 +279,8 @@ export async function ciPublish(ctx: Ctx, opts: PublishOpts): Promise<string[]> 
     for (const k of db.allKeys(`item:${desk}:${repo}:`)) {
       const id = k.slice(`item:${desk}:${repo}:`.length);
       if (pending.has(id)) continue;
-      await gh.editComment(desk, Number(db.get(k)), `~~${id}~~ decided`).catch(() => undefined);
+      const stale = id.startsWith('a') && actionStatus(db, id) === 'stale';
+      await gh.editComment(desk, Number(db.get(k)), `~~${id}~~ ${stale ? 'outdated, drafted again below' : 'decided'}`).catch(() => undefined);
       db.set(k, null);
     }
     for (const it of pendingItems(db, repo)) {

@@ -32,6 +32,10 @@ describe('staticChecks', () => {
     expect(staticChecks(block('a', ['+-----BEGIN RSA PRIVATE KEY-----']), repo).ok).toBe(false);
     expect(staticChecks(block('a', ['-old AKIAABCDEFGHIJKLMNOP']), repo).ok).toBe(true);
   });
+  it('rejects leftover merge conflict markers', () => {
+    expect(staticChecks(block('a.ts', ['+<<<<<<< HEAD', '+x', '+=======', '+y', '+>>>>>>> main']), repo)).toMatchObject({ ok: false, reason: /conflict marker/ });
+    expect(staticChecks(block('a.md', ['+Title', '+=======']), repo).ok).toBe(true);
+  });
   it('rejects patches that touch .git', () => {
     expect(staticChecks(block('.git/hooks/post-checkout'), repo)).toMatchObject({ ok: false, reason: /forbidden/ });
   });

@@ -57,6 +57,8 @@ export function staticChecks(patch: string, repo: RepoConfig): GateResult {
     }
   }
   const added = patch.split('\n').filter((l) => l.startsWith('+') && !l.startsWith('+++'));
+  const marker = added.find((l) => /^\+(<{7}|>{7})( |$)/.test(l));
+  if (marker) return { ok: false, reason: `diff contains a merge conflict marker (${marker.slice(1, 40)})` };
   for (const line of added) {
     for (const [name, re] of SECRET_PATTERNS) {
       if (re.test(line)) return { ok: false, reason: `diff looks like it contains a ${name}` };

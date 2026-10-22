@@ -2,7 +2,7 @@ import { mkdtempSync, mkdirSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
-import { filterPatch, parsePatch, readAgentFile } from '../src/git.js';
+import { filterPatch, git, mergeConflicts, parsePatch, readAgentFile } from '../src/git.js';
 
 const block = (path: string, body = '@@ -1 +1 @@\n-a\n+b\n', extra = '') =>
   `diff --git a/${path} b/${path}\n${extra}index 1..2 100644\n--- a/${path}\n+++ b/${path}\n${body}`;
@@ -81,5 +81,35 @@ describe('freshClone', () => {
     expect(await git(join(dest, 'c'), ['rev-parse', 'HEAD'])).toBe(old);
     const { rmSync } = await import('node:fs');
     rmSync(mirror, { recursive: true, force: true });
+  });
+});
+
+describe('mergeConflicts', () => {
+  // base: a.txt = 1..5; main changes line 1, the PR changes line 1 differently or line 5.
+  const repo = async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'oss-bot-merge-'));
+    const commit = async (content: string, msg: string) => {
+      writeFileSync(join(dir, 'a.txt'), content);
+      await git(dir, ['add', '-A']);
+      await git(dir, ['-c', 'user.name=t', '-c', 'user.email=t@t', 'commit', '-qm', msg]);
+      return git(dir, ['rev-parse', 'HEAD']);
+    };
+    await git(dir, ['init', '-q']);
+    const base = await commit('1\n2\n3\n4\n5\n', 'base');
+    const main = await commit('one\n2\n3\n4\n5\n', 'main');
+    await git(dir, ['checkout', '-q', base]);
+    const clash = await commit('uno\n2\n3\n4\n5\n', 'clash');
+    await git(dir, ['checkout', '-q', base]);
+    const clean = await commit('1\n2\n3\n4\nfive\n', 'clean');
+    return { dir, base, main, clash, clean };
+  };
+  it('names the files that conflict with the target', async () => {
+    const r = await repo();
+    expect(await mergeConflicts(r.dir, r.base, r.main, r.clash)).toEqual(['a.txt']);
+  });
+  it('is empty when the change merges, or is already on the target', async () => {
+    const r = await repo();
+    expect(await mergeConflicts(r.dir, r.base, r.main, r.clean)).toEqual([]);
+    expect(await mergeConflicts(r.dir, r.main, r.main, r.clash)).toEqual([]);
   });
 });

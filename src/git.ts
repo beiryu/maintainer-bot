@@ -62,6 +62,20 @@ export async function ensureCommit(repo: string, sha: string) {
   if (has.exitCode !== 0) await git(dir, ['fetch', '--quiet', '--depth', '1', 'origin', `+${sha}:refs/heads/mb-base-${sha.slice(0, 12)}`]);
 }
 
+/**
+ * Whether `tip` (commits on top of `base`) merges into `target` without conflicts, as GitHub
+ * would merge the PR. `--merge-base` is given because shallow clones cannot compute it; all
+ * three commits must be in `dir`. Returns the conflicting paths, empty when clean.
+ */
+export async function mergeConflicts(dir: string, base: string, target: string, tip: string): Promise<string[]> {
+  if (base === target) return [];
+  const r = await execa('git', [...SAFE, 'merge-tree', '--write-tree', '--name-only', '--no-messages', `--merge-base=${base}`, target, tip], { cwd: dir, reject: false });
+  if (r.exitCode === 0) return [];
+  if (r.exitCode !== 1) throw new Error(`git merge-tree failed: ${r.stderr.trim()}`);
+  // First line is the tree; then the conflicted paths.
+  return [...new Set(r.stdout.trim().split('\n').slice(1).filter(Boolean))];
+}
+
 /** An independent clone of the mirror at `sha` (no hardlinks or alternates back to it). */
 export async function freshClone(repo: string, sha: string, dest: string) {
   await ensureCommit(repo, sha);

@@ -126,7 +126,7 @@ export interface PendingAction {
   message: string;
   patch: string | null;
   base_sha: string | null;     // rebase: the new base the patch applies to
-  status: 'pending' | 'done' | 'rejected';
+  status: 'pending' | 'done' | 'rejected' | 'stale'; // stale: the base moved on; replaced by a new draft
   created_at: string;
 }
 

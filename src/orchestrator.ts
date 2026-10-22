@@ -11,7 +11,7 @@ import { housekeeping } from './housekeeping.js';
 import { cmd, needsYou } from './inbox.js';
 import { checkDependencies, runGate, hashTestFiles, focusedTestCommand, repairPathVars, staticChecks } from './gate.js';
 import {
-  agentDir, AGENT_META, applyPatch, ensureMirror, freshClone, git, issueDir, mirrorDir, parsePatch,
+  agentDir, AGENT_META, applyPatch, ensureMirror, freshClone, git, issueDir, mergeConflicts, mirrorDir, parsePatch,
   prepareAgentWorkdir, readAgentFile,
 } from './git.js';
 import { pushViaApi } from './gitapi.js';
@@ -52,7 +52,7 @@ export function withLock<T>(fn: () => Promise<T>, lock = 'data/run.lock'): Promi
 
 // ---------------------------------------------------------------- main loop
 
-export interface RunOpts { dry: boolean; repo?: string; issue?: number; triageOnly?: boolean; audit?: 'auto' | 'skip' | 'only' }
+export interface RunOpts { dry: boolean; repo?: string; issue?: number; triageOnly?: boolean; audit?: 'auto' | 'skip' | 'only' | 'due' }
 
 export async function runOnce(ctx: Ctx, opts: RunOpts) {
   const { cfg, db } = ctx;
@@ -789,6 +789,12 @@ async function followUp(ctx: Ctx, issueId: number): Promise<string | null> {
 
   // 1. Conflicts with the base branch: rebase, gate, queue the push for approval.
   if (snap.mergeable === 'CONFLICTING') {
+    // A rebase drafted on an older main would be pushed still conflicting: draft it again on today's.
+    if (pending?.kind === 'rebase' && pending.base_sha !== await git(mirrorDir(issue.repo), ['rev-parse', 'HEAD'])) {
+      db.setActionStatus(pending.id, 'stale');
+      log(`#${issue.number}: a${pending.id} was drafted on an older ${rc.default_branch}; drafting it again`);
+      return prepareRebase(ctx, rc, issue, pr, 'conflict');
+    }
     if (pending) return `PR ${pr.url}: conflicts with ${rc.default_branch}, but a draft is still pending`;
     return prepareRebase(ctx, rc, issue, pr, 'conflict');
   }
@@ -1032,7 +1038,12 @@ async function verifyBranchIsOurs(push: string, rc: RepoConfig, issue: Issue, ti
   return issue.base_sha!;
 }
 
-/** Replaces the PR branch with one commit of the rebased patch; refuses if the branch moved since the bot last pushed it. */
+/**
+ * Replaces the PR branch with one commit of the rebased patch; refuses if the branch moved since
+ * the bot last pushed it. The patch goes on the default branch as it is now, not as it was when
+ * the rebase was drafted: if it no longer applies there, nothing is pushed and the draft is
+ * marked stale so the next run drafts it again.
+ */
 async function approveRebase(ctx: Ctx, action: PendingAction, issue: Issue, pr: Pr): Promise<string> {
   const { cfg, db } = ctx;
   const rc = repoConfig(cfg, issue.repo);
@@ -1041,25 +1052,52 @@ async function approveRebase(ctx: Ctx, action: PendingAction, issue: Issue, pr: 
   const dir = issueDir(issue.repo, issue.number);
   const push = join(dir, 'push');
   const who = await identity(cfg);
+  const main = await ensureMirror(issue.repo, rc.default_branch);
   await freshClone(issue.repo, action.base_sha!, push);
   await git(push, ['checkout', '-q', '-B', issue.branch!]); // freshClone leaves HEAD detached; push needs the branch
   await git(push, ['remote', 'add', 'fork', `https://github.com/${rc.full_name}.git`]);
   await git(push, [...who, 'fetch', '--quiet', '--depth', '50', 'fork', issue.branch!]);
   const remoteSha = await git(push, ['rev-parse', 'FETCH_HEAD']);
   await verifyBranchIsOurs(push, rc, issue, remoteSha);
-  await git(push, ['read-tree', '--reset', '-u', action.base_sha!]);
-  await applyPatch(push, action.patch!);
+  await git(push, ['reset', '--quiet', '--hard', main]);
+  try {
+    await applyPatch(push, action.patch!, main !== action.base_sha);
+  } catch {
+    db.setActionStatus(action.id, 'stale');
+    db.set(`rebase-tried:${issue.id}`, null);
+    throw new Error(`${rc.default_branch} moved since a${action.id} was drafted and it no longer applies; nothing pushed, a new rebase comes in the next run`);
+  }
   await git(push, [...who, 'commit', ...(rc.signoff ? ['--signoff'] : []), '-m', issue.pr_title ?? `Fix #${issue.number}`, '-m', `Closes #${issue.number}`]);
-  const full = await afterCommit(cfg, rc, push, action.base_sha!, who);
-  const tip = await pushBranch(cfg, rc, push, issue.branch!, action.base_sha!, { who, expectedHead: remoteSha, force: true });
+  const full = await afterCommit(cfg, rc, push, main, who);
+  const tip = await pushBranch(cfg, rc, push, issue.branch!, main, { who, expectedHead: remoteSha, force: true });
   savePatch(db, issue, full);
-  db.update(issue.id, { base_sha: action.base_sha });
+  db.update(issue.id, { base_sha: main });
   db.updatePr(issue.id, { head_sha: tip, mergeable: 'UNKNOWN', ci_state: 'pending' });
   db.setActionStatus(action.id, 'done');
-  const done = `rebased ${pr.url} onto ${action.base_sha!.slice(0, 10)}; branch now at ${tip.slice(0, 7)}`;
+  const done = `rebased ${pr.url} onto ${rc.default_branch} @ ${main.slice(0, 7)}; branch now at ${tip.slice(0, 7)}${await confirmMergeable(ctx, issue, tip)}`;
   console.log(done);
   return done;
 }
+
+/**
+ * After a push: waits for GitHub to compute whether the PR merges and reports it, so a push that
+ * still conflicts is never reported as done. A conflict sends the PR back into the rebase loop.
+ */
+async function confirmMergeable(ctx: Ctx, issue: Issue, tip: string): Promise<string> {
+  const pr = ctx.db.prForIssue(issue.id)!;
+  for (let i = 0; i < 12; i++) {
+    const snap = await gh.prSnapshot(issue.repo, pr.number).catch(() => null);
+    if (snap && snap.headSha === tip && snap.mergeable !== 'UNKNOWN') {
+      ctx.db.updatePr(issue.id, { mergeable: snap.mergeable });
+      if (snap.mergeable === 'MERGEABLE') return '; merges cleanly';
+      ctx.db.set(`rebase-tried:${issue.id}`, null);
+      return '; ⚠️ GitHub still reports a conflict, a new rebase comes in the next run';
+    }
+    await new Promise((r) => setTimeout(r, CONFIRM_WAIT_MS));
+  }
+  return '; GitHub has not finished checking for conflicts yet';
+}
+const CONFIRM_WAIT_MS = 5000;
 
 export function followupCommitMessage(dir: string, draftTitle: string | null): string {
   const body = join(dir, 'PR_BODY.md');
@@ -1116,21 +1154,40 @@ export async function approveFollowup(ctx: Ctx, actionId: number, opts: { messag
     await git(push, [...who, 'fetch', '--quiet', 'fork', issue.branch!]);
     await git(push, ['reset', '--quiet', '--hard', 'FETCH_HEAD']);
     const remoteSha = await git(push, ['rev-parse', 'HEAD']);
-    const base = await verifyBranchIsOurs(push, rc, issue, remoteSha);
+    let base = await verifyBranchIsOurs(push, rc, issue, remoteSha);
     await git(push, ['reset', '--quiet', '--hard', remoteSha]);
     // Reset the tree to base, apply the full new patch: the commit holds exactly the delta.
     // The patch was made on the old base; on a branch updated from main it is merged in (3-way).
     await git(push, ['read-tree', '--reset', '-u', base]);
     await applyPatch(push, action.patch, base !== issue.base_sha);
     await git(push, [...who, 'commit', ...(rc.signoff ? ['--signoff'] : []), '-m', followupCommitMessage(dir, issue.pr_title)]);
+    // A commit on a branch that conflicts with main leaves the PR unmergeable: then the whole
+    // change goes on today's main as one commit instead, or nothing is pushed.
+    await git(push, [...who, 'fetch', '--quiet', '--depth', '1', 'fork', rc.default_branch]);
+    const main = await git(push, ['rev-parse', 'FETCH_HEAD']);
+    const clash = await mergeConflicts(push, base, main, 'HEAD');
+    let onto = remoteSha;
+    if (clash.length) {
+      await git(push, ['reset', '--quiet', '--hard', main]);
+      try {
+        await applyPatch(push, action.patch, true);
+      } catch {
+        throw new Error(`${pr.url} conflicts with ${rc.default_branch} (${clash.join(', ')}) and the fix does not apply on it; nothing pushed. Reject a${actionId} and I'll rebase the PR first`);
+      }
+      await git(push, [...who, 'commit', ...(rc.signoff ? ['--signoff'] : []), '-m', issue.pr_title ?? `Fix #${issue.number}`, '-m', `Closes #${issue.number}`]);
+      base = main;
+      onto = main;
+    }
     const full = await afterCommit(cfg, rc, push, base, who);
-    pushed = await pushBranch(cfg, rc, push, issue.branch!, remoteSha, { who, expectedHead: remoteSha });
+    pushed = await pushBranch(cfg, rc, push, issue.branch!, onto, { who, expectedHead: remoteSha, force: onto !== remoteSha });
     savePatch(db, issue, full);
     if (base !== issue.base_sha) db.update(issue.id, { base_sha: base });
+    db.updatePr(issue.id, { head_sha: pushed, mergeable: 'UNKNOWN', ci_state: 'pending' });
   }
   if (message) await gh.commentOnIssue(issue.repo, pr.number, message);
   db.setActionStatus(actionId, 'done');
-  const done = `${[pushed ? `pushed ${pushed.slice(0, 7)} to` : '', message ? 'replied on' : ''].filter(Boolean).join(' and ')} ${pr.url}`;
+  const done = `${[pushed ? `pushed ${pushed.slice(0, 7)} to` : '', message ? 'replied on' : ''].filter(Boolean).join(' and ')} ${pr.url}`
+    + (pushed ? await confirmMergeable(ctx, issue, pushed) : '');
   console.log(done);
   return done;
 }
