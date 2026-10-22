@@ -68,24 +68,14 @@ Weigh what would move these, and say so in the rationale of product proposals.
 {{traction}}
 </traction>
 
-The research run looked at the project before you. Its findings are your main material: turn
-the ones that matter into proposals and cite them (with their URLs, commands and outputs) in
-the proposal's evidence. {{since}}
+The research list: what the research runs found (web research, a newcomer's tryout, a code
+review), one item `r<n>` each, with its state. It is your main material: turn the open items
+that matter into proposals and cite their URLs, commands and outputs in the evidence.
+{{since}}
 
-Research outside the repository (web, with sources):
 <research>
 {{research}}
 </research>
-
-A newcomer trying the project from its README:
-<tryout>
-{{tryout}}
-</tryout>
-
-A code review, area by area:
-<inspection>
-{{inspection}}
-</inspection>
 
 What changed upstream in the data sources the repo is built from, if anything:
 
@@ -102,13 +92,16 @@ repeat a rejected one unless something changed; do not repeat a pending one at a
 
 ## What to do
 
-The heavy looking was done by the research run above: the web, a newcomer's tryout and a code
+The heavy looking was done by the research runs above: the web, a newcomer's tryout and a code
 review. Do not repeat it. Your job is light: turn what is new into proposals.
 
 - What is new: research findings no earlier proposal covers, upstream changes, and what
   happened since the last audit (new commits, issues, PRs, decisions on earlier proposals).
 - Open a file only to confirm a finding or to name the exact paths in a proposal. Do not
   explore the repository on your own.
+- Link each proposal to the research items it comes from (`findings`: the numbers of r<n>).
+- Tick items that are done (`resolved`, with a short reason): the issue made from them was
+  closed, the code already does it, or it no longer holds. Leave an item open when unsure.
 - Nothing new is a normal answer: return an empty `proposals` list and say so in the summary.
 - Work only a person can do (posting, accounts, decisions, legal sources) is still worth
   proposing: set agent_suitable=false and make the body a checklist they can follow.
@@ -145,9 +138,11 @@ End your answer with exactly one JSON block. `body` is GitHub Markdown for the i
       "evidence": ["packages/core/src/x.ts", "README.md#usage"],
       "covers_issue": null,
       "covers_rm": null,
-      "agent_suitable": true
+      "agent_suitable": true,
+      "findings": [12, 14]
     }
   ],
+  "resolved": [{"id": 3, "why": "#95 fixed it"}],
   "summary": "two or three sentences on the state of the repository"
 }
 ```

@@ -23,7 +23,7 @@ Traction now:
 {{traction}}
 </traction>
 
-What is already known. Do not report it again:
+What is already known (the research list so far, issues, PRs, proposals). Do not report it again:
 
 <known>
 {{known}}

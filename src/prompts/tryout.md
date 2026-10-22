@@ -14,7 +14,7 @@ else than the docs say, unclear or missing steps, confusing errors, wrong or sur
 results, features documented in one place and missing in another, slow or heavy paths.
 Do not report style preferences.
 
-What is already known. Do not report it again:
+What is already known (the research list so far, issues, PRs, proposals). Do not report it again:
 
 <known>
 {{known}}

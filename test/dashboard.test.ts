@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { DASHBOARD_MARK, dashboardChanged, itemComment, parseCommands, parseCommandTitle, pendingItems, renderDashboard } from '../src/dashboard.js';
 import { Db } from '../src/db.js';
+import { addFindings, tickedIds, updateItems } from '../src/research.js';
 
 const cfg = { repos: [{ full_name: 'o/r', sources: [] }], limits: { max_in_flight_per_repo: 1 }, budget: { max_cost_per_call_usd: 3 } } as never;
 
@@ -21,16 +22,26 @@ function populated() {
 }
 
 describe('renderDashboard', () => {
-  it('folds the last research run under its time', () => {
+  it('lists research items like a roadmap: a checkbox each, open first, grouped by source', () => {
     const db = new Db(':memory:');
     db.upsertRepo('o/r');
     expect(renderDashboard(db, cfg, { repo: 'o/r' })).not.toContain('### Research');
-    db.set('research:o/r', JSON.stringify({ at: '2026-10-22T13:13:53.468Z', research: 'Not in the MCP Registry.\n\n- registry: count 0', tryout: 'Builds cleanly.', inspection: 'Sound.' }));
-    const body = renderDashboard(db, cfg, { repo: 'o/r' });
-    expect(body).toContain('### Research · 2026-10-22 13:13 UTC');
-    expect(body).toContain('<details><summary>Web</summary>\n\n  Not in the MCP Registry.\n\n  - registry: count 0');
-    expect(body).toContain('<details><summary>Newcomer tryout</summary>');
-    expect(body).toContain('<details><summary>Code</summary>');
+    addFindings(db, 'o/r', 'web', [{ title: 'Not in the MCP Registry', detail: 'Search returned 0. Publishing needs a server.json.', evidence: ['https://registry.example/x?q=1'] }], '2026-10-22T13:10:00Z');
+    addFindings(db, 'o/r', 'code', [{ title: 'CCCD year 2300', detail: 'parseCitizenId accepts it.', evidence: ['src/id.ts:46'] }, { title: 'tlv counts UTF-16', detail: 'Not bytes.', evidence: [] }], '2026-10-22T13:12:00Z');
+    updateItems(db, 'o/r', [2], (i) => { i.done = true; i.note = '#95 fixed it'; });
+    updateItems(db, 'o/r', [3], (i) => { i.proposal = 7; });
+    db.set('researched:o/r', JSON.stringify({ at: '2026-10-22T13:12:30Z', added: 2 }));
+    const body = renderDashboard(db, cfg, { repo: 'o/r', now: Date.parse('2026-10-23T00:00:00Z') });
+    expect(body).toContain('_2 open · 1 done · last run 2026-10-22 13:12 UTC, 2 new. Tick what is done._');
+    expect(body).toContain('**Web**\n\n- [ ] r1 **Not in the MCP Registry**: Search returned 0. · [source](https://registry.example/x?q=1) · 22/10');
+    expect(body).toContain('**Code**\n\n- [ ] r3 **tlv counts UTF-16**: Not bytes. · → p7 · 22/10\n- [x] r2 **CCCD year 2300**: parseCitizenId accepts it. · #95 fixed it · 22/10');
+    expect(body).not.toContain('<details>');
+  });
+  it('reads the ticks on the dashboard and never adds the same title twice', () => {
+    expect(tickedIds('- [x] r3 **a**\n- [ ] r4 **b**\n  - [X] r12 **c**\n- [x] p5 not research')).toEqual([3, 12]);
+    const db = new Db(':memory:');
+    expect(addFindings(db, 'o/r', 'web', [{ title: 'Same thing', detail: 'a', evidence: [] }], 't1')).toHaveLength(1);
+    expect(addFindings(db, 'o/r', 'code', [{ title: 'same  THING!', detail: 'b', evidence: [] }, { title: 'Other', detail: 'c', evidence: [] }], 't2').map((i) => i.id)).toEqual([2]);
   });
   it('lists every decision with the command that approves it, one line each, and the rest as status', () => {
     const { db, a, p, d1, d2 } = populated();

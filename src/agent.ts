@@ -90,7 +90,11 @@ export const AGENTS = {
         covers_rm: z.string().nullable().default(null),
         // False when only a person can do it (needs a decision, money, an account, legal judgement).
         agent_suitable: z.boolean().default(true),
+        // Research items (r<n>) this proposal comes from.
+        findings: z.array(z.number()).default([]),
       })).default([]),
+      // Research items that are done: their issue was closed, they no longer hold, or not worth doing.
+      resolved: z.array(z.object({ id: z.number(), why: z.string() })).default([]),
       summary: z.string().default(''),
     }),
   },

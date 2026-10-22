@@ -15,7 +15,7 @@ look for real defects, not style:
 - Public API that is awkward, undocumented or inconsistent with the rest.
 - Security and robustness: untrusted input reaching shell, regex, file paths or network.
 
-What is already known. Do not report it again:
+What is already known (the research list so far, issues, PRs, proposals). Do not report it again:
 
 <known>
 {{known}}

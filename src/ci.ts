@@ -8,6 +8,7 @@ import { ensureMirror } from './git.js';
 import * as gh from './github.js';
 import { approveFollowup, approveProposal, type Ctx, openPr, rejectProposal, replyText, runOnce, STOP_MARK, type Task, withMaintainerComments } from './orchestrator.js';
 import { approveDraft } from './outside.js';
+import { tickedIds, updateItems } from './research.js';
 
 // The bot on GitHub Actions. One workflow run = one pass, in two jobs:
 //   agent    reads GitHub with the Actions token, runs agents and the gate, writes nothing but
@@ -339,7 +340,11 @@ export async function ciPublish(ctx: Ctx, opts: PublishOpts): Promise<string[]> 
     } catch (e) { log(`#${i.number}: stop note not posted: ${(e as Error).message.split('\n')[0]}`); }
   }
 
-  // 4. The dashboard.
+  // 4. The dashboard. Research items the maintainer ticked there are done.
+  if (dash) {
+    const ticked = tickedIds(dash.body);
+    if (ticked.length) updateItems(db, repo, ticked, (i) => { if (!i.done) { i.done = true; i.note = 'ticked by you'; } });
+  }
   if (db.get('budget-exhausted')) notes.push(`⏸ This month's budget ($${cfg.budget.max_cost_per_month_usd}) is spent; no agent runs until next month.`);
   const body = renderDashboard(db, cfg, {
     repo, desk, runUrl: opts.runUrl, notes, monthCostUsd: db.costSince(monthStart()),

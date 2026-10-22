@@ -1,6 +1,7 @@
 import type { Config } from './config.js';
 import { ACTIVE_STATES, type Db } from './db.js';
 import { replyText } from './orchestrator.js';
+import { researchItems, SOURCE_LABEL } from './research.js';
 
 // The inbox as a pinned GitHub issue, for a bot that runs on GitHub Actions. The bot alone
 // writes it (its edits start no run); the maintainer decides by commenting /approve, /reject
@@ -170,16 +171,47 @@ export function renderDashboard(db: Db, cfg: Config, info: DashboardInfo): strin
     for (const s of src) L.push(`- **${s.name}**: ${esc(s.digest!.split('\n')[0])}`);
     L.push('');
   }
-  // The last research run, folded: what the next audits work from.
-  const research = db.get(`research:${repo}`);
-  if (research) {
-    const r = JSON.parse(research) as { at: string; research: string; tryout: string; inspection: string };
-    L.push(`### Research · ${r.at.replace('T', ' ').slice(0, 16)} UTC`,
-      details('Web', r.research.slice(0, 15_000)), details('Newcomer tryout', r.tryout.slice(0, 15_000)),
-      details('Code', r.inspection.slice(0, 15_000)), '');
-  }
+  L.push(...researchSection(db, repo, now));
   L.push('---', 'Decide with the links on each item below. Also: `/retry #N` · `/take N` · `/pause` · `/resume`');
   return L.join('\n');
+}
+
+/** First sentence of a finding, cut at a word near `max`. */
+const brief = (s: string, max = 180) => {
+  const one = esc(s).split(/(?<=[.!?])\s/)[0]!;
+  return one.length <= max ? one : `${one.slice(0, max).replace(/\s+\S*$/, '')}…`;
+};
+
+/**
+ * The research list, like a roadmap: one checkbox per item, grouped by where it came from.
+ * Open items all show; done ones for 30 days. Tick an item here and the next run marks it done.
+ */
+export function researchSection(db: Db, repo: string, now = Date.now()): string[] {
+  const items = researchItems(db, repo);
+  if (!items.length) return [];
+  const run = db.get(`researched:${repo}`);
+  const last = run ? JSON.parse(run) as { at: string; added: number } : null;
+  const open = items.filter((i) => !i.done).length;
+  const L = ['### Research', '',
+    `_${open} open · ${items.length - open} done${last ? ` · last run ${last.at.replace('T', ' ').slice(0, 16)} UTC, ${last.added} new` : ''}. Tick what is done._`, ''];
+  const cutoff = new Date(now - 30 * 86_400_000).toISOString();
+  for (const source of ['web', 'tryout', 'code'] as const) {
+    const rows = items.filter((i) => i.source === source && (!i.done || i.found_at >= cutoff));
+    if (!rows.length) continue;
+    L.push(`**${SOURCE_LABEL[source]}**`, '');
+    for (const i of [...rows.filter((i) => !i.done), ...rows.filter((i) => i.done)]) {
+      const url = i.evidence.find((e) => /^https:\/\//.test(e));
+      const tail = [
+        url ? `[source](${url.split(/\s/)[0]})` : '',
+        i.proposal ? `→ p${i.proposal}` : '',
+        i.done && i.note ? esc(i.note).slice(0, 80) : '',
+        i.found_at.slice(5, 10).split('-').reverse().join('/'),
+      ].filter(Boolean).join(' · ');
+      L.push(`- [${i.done ? 'x' : ' '}] r${i.id} **${esc(i.title)}**: ${brief(i.detail)} · ${tail}`);
+    }
+    L.push('');
+  }
+  return L;
 }
 
 /**
