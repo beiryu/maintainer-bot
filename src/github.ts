@@ -163,6 +163,9 @@ export async function addComment(repo: string, number: number, body: string): Pr
   const r = JSON.parse(await gh(['api', '-X', 'POST', `repos/${repo}/issues/${number}/comments`, '--input', '-'], JSON.stringify({ body }), false));
   return r.id as number;
 }
+export async function deleteComment(repo: string, id: number) {
+  await gh(['api', '-X', 'DELETE', `repos/${repo}/issues/comments/${id}`], undefined, false);
+}
 export async function editComment(repo: string, id: number, body: string) {
   await gh(['api', '-X', 'PATCH', `repos/${repo}/issues/comments/${id}`, '--input', '-'], JSON.stringify({ body }), false);
 }

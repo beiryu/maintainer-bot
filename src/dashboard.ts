@@ -91,23 +91,6 @@ export function pendingItems(db: Db, repo: string): PendingItem[] {
   return out;
 }
 
-/**
- * A link that opens a new issue in the desk repo with `cmd` as its title: on a phone that is
- * two taps (the link, then Submit). The repo it is for rides in the title.
- */
-export const commandLink = (label: string, cmd: string, desk: string, repo: string) =>
-  `[${label}](https://github.com/${desk}/issues/new?title=${encodeURIComponent(`${cmd} (${repo})`)})`;
-
-/** The comment that stands for one pending item, with one link per decision. */
-export function itemComment(it: PendingItem, desk: string, repo: string): string {
-  const links = [
-    commandLink('👍 Approve', `/approve ${it.id}`, desk, repo),
-    commandLink('👎 Reject', `/reject ${it.id}`, desk, repo),
-    ...(it.rocket ? [commandLink(`🚀 Approve and ${it.rocket}`, `/approve ${it.id} ${it.id[0] === 'd' && /changes/.test(it.rocket) ? '--changes' : '--take'}`, desk, repo)] : []),
-  ].join(' · ');
-  return `${itemMark(it.id)}\n${it.line}\n\n${links}\n${it.detail}`;
-}
-
 /** `/approve a3 (owner/repo)` → the repo and the command text without it; null when the title is not one. */
 export function parseCommandTitle(title: string): { repo: string; text: string } | null {
   const m = /^\s*(\/.+?)\s*\(([\w.-]+\/[\w.-]+)\)\s*$/.exec(title);
@@ -134,18 +117,17 @@ export function renderDashboard(db: Db, cfg: Config, info: DashboardInfo): strin
     if (days <= 21) L.push(`> ⚠️ MAINTAINER_TOKEN ${days <= 0 ? 'has expired' : `expires in ${days} days`}`, '');
   }
 
-  const todo: string[] = pendingItems(db, repo).map((it) => `- ${it.line}`);
+  // Nothing here waits for a decision: the bot acts on its own. This is what it could not get through.
+  const stuck: string[] = [];
   for (const i of db.issuesInState('skipped').filter((i) => i.repo === repo && db.get(`handed-back:${i.id}`) && !i.skip_reason?.startsWith('rejected by human'))) {
-    todo.push(`- ${iss(i.number)} stopped: ${esc((i.skip_reason ?? '').slice(0, 140))} → \`/retry #${i.number}\``);
+    stuck.push(`- ${iss(i.number)} stopped: ${esc((i.skip_reason ?? '').slice(0, 140))}`);
   }
-  // PRs whose rebase gave up on this base: one click tries again.
   for (const p of db.openPrsWithIssue().filter((p) => p.repo === repo && p.mergeable === 'CONFLICTING' && db.get(`rebase-tried:${p.issue_id}`) && !db.pendingActionFor(p.issue_id))) {
-    const retry = info.desk ? commandLink('🔁 Retry', `/retry #${p.number}`, info.desk, repo) : `\`/retry #${p.number}\``;
-    todo.push(`- ${pr(p.number)} conflicts with the base and my rebase did not get through → ${retry}`);
+    stuck.push(`- ${pr(p.number)} conflicts with the base and the rebase did not get through`);
   }
   const blocked = db.blockedIssues(repo);
-  if (blocked.length) todo.push(`- gate broken on base: ${esc(blocked[0].blocked!)}`);
-  L.push('### To decide', '', ...(todo.length ? ['Each item below has 👍 Approve / 👎 Reject links.', '', ...todo] : ['_Nothing._']), '');
+  if (blocked.length) stuck.push(`- gate broken on base: ${esc(blocked[0].blocked!)}`);
+  if (stuck.length) L.push('### Stuck', '', ...stuck, '');
 
   const prs = db.openPrsWithIssue().filter((p) => p.repo === repo);
   if (prs.length) {
@@ -172,7 +154,6 @@ export function renderDashboard(db: Db, cfg: Config, info: DashboardInfo): strin
     L.push('');
   }
   L.push(...researchSection(db, repo));
-  L.push('---', 'Decide with the links on each item below. Also: `/retry #N` · `/take N` · `/pause` · `/resume`');
   return L.join('\n');
 }
 
@@ -191,7 +172,7 @@ export function researchSection(db: Db, repo: string, room = 50_000): string[] {
   const items = researchItems(db, repo);
   if (!items.length) return [];
   const run = db.get(`researched:${repo}`);
-  const last = run ? JSON.parse(run) as { at: string; added: number; planned?: number } : null;
+  const last = run ? JSON.parse(run) as { at: string; added: number; planned?: number; skipped?: number } : null;
   const open = items.filter((i) => !i.done).length;
   const link = (n: number) => `[#${n}](https://github.com/${repo}/issues/${n})`;
   const line = (i: ResearchItem) => {
@@ -209,7 +190,7 @@ export function researchSection(db: Db, repo: string, room = 50_000): string[] {
   let size = 0;
   const shown = lines.filter((l) => (size += l.length + 1) <= room);
   const L = ['### Research', '',
-    `_${open} open · ${items.length - open} done${last ? ` · last run ${last.at.replace('T', ' ').slice(0, 16)} UTC: ${last.added} new, ${last.planned ?? 0} issue(s) opened` : ''}. Tick what is done._`, '',
+    `_${open} open · ${items.length - open} done${last ? ` · last run ${last.at.replace('T', ' ').slice(0, 16)} UTC: ${last.skipped ? 'only ticked done items (too many open)' : `${last.added} new, ${last.planned ?? 0} issue(s) opened`}` : ''}. Tick what is done._`, '',
     ...shown];
   if (shown.length < lines.length) L.push(`- … ${lines.length - shown.length} older done item(s) not shown (issue size limit)`);
   L.push('');

@@ -13,7 +13,8 @@ CONTRIBUTING (`agent_disclosure` adds a line per PR if you want one).
 
 Sibling of `oss-bot` (same pipeline; copied, not shared). oss-bot works on other people's
 repos and asks before every post; maintainer-bot works on yours, so it opens issues and PRs on
-its own. You merge, tick the research list, and decide drafted replies to other people.
+its own, and answers other people's issues and PRs. You merge and tick the research list; the
+dashboard shows status only, nothing waits for a decision there.
 
 ## Pipeline
 
@@ -24,9 +25,9 @@ research: closed issues ─▶ items ticked; researcher + tryout + inspector ─
 audit:    open issue assigned to you, while open PRs + work in progress < max_open_prs (10)
           ─▶ claimed ─▶ reproduced ─▶ coded ─▶ gated ─▶ reviewed ─▶ pr_open ─(you merge)─▶ done
                            when it gives up: a short comment on the issue says why, and it is listed on the dashboard
-open PR: CI failed / review comments / behind base ─(followup agent)─▶ drafted fix, reply or rebase ─(/approve a<n>)─▶ pushed
-someone else's issue ─(maintainer-triage)─▶ draft d<n>: labels + reply ─(/approve d<n> [--take])─▶ posted [+ assigned to you → pipeline]
-someone else's PR ─(pr-reviewer, from the diff and its CI)─▶ draft d<n>: review ─(/approve d<n> [--changes])─▶ posted
+open PR: CI failed / review comments / behind base ─(followup agent)─▶ fix, reply or rebase ─▶ pushed
+someone else's issue ─(maintainer-triage)─▶ labels + reply ─▶ posted [+ assigned to you → pipeline when it can take it]
+someone else's PR ─(pr-reviewer, from the diff and its CI)─▶ review ─▶ posted
 ```
 
 You take an issue the way any maintainer does, by assigning it to yourself. Other people's
@@ -38,7 +39,7 @@ times; then the issue is handed back with the reason.
 ## On GitHub Actions (the normal way)
 
 The bot runs inside the repository it maintains, as a reusable workflow. Nothing runs on
-your machine; you decide on a pinned **Maintainer Dashboard** issue, from the phone if you like.
+your machine; you follow it on a pinned **Maintainer Dashboard** issue, from the phone if you like.
 
 ```
 event (issue assigned to you, review comment, CI failed, a /command on the dashboard)  → audit
@@ -67,10 +68,9 @@ Setup, per repository:
 4. Run the workflow once by hand (Actions → maintainer-bot → Run workflow): it creates and
    pins the dashboard. Keep `draft_prs: true` until the first PRs look right.
 
-Then: assign an issue to yourself and the next run implements it. Each pending decision is a
-comment on the dashboard with 👍 Approve / 👎 Reject links: a link opens a new desk issue titled
-with the command; submit it and the run answers and closes it. Commands typed in a comment
-work too: `/approve p3`, `/reject p8 reason`, `/retry #14`, `/take 12`, `/pause`, `/resume`.
+Then: research opens issues and the audit runs implement them; assign an issue to yourself and
+it is worked on too. The dashboard shows status and the research list; tick an item there when it
+is done. A comment on the dashboard still takes `/retry #14`, `/take 12`, `/pause`, `/resume`.
 
 Private dashboard: set `bot.dashboard_repo: you/desk` (a private repo) and the dashboard issue
 lives there instead, one issue per maintained repo. Add `MAINTAINER_TOKEN` access to the desk repo

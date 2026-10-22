@@ -2,7 +2,7 @@ import { readFileSync } from 'node:fs';
 import { parse } from 'yaml';
 import { z } from 'zod';
 import { type Config, parseConfig, repoConfig, RepoConfigSchema, repoOwner } from './config.js';
-import { type Command, DASHBOARD_MARK, dashboardChanged, dashboardTitle, itemComment, parseCommands, parseCommandTitle, pendingItems, renderDashboard, repoMark } from './dashboard.js';
+import { type Command, DASHBOARD_MARK, dashboardChanged, dashboardTitle, parseCommands, parseCommandTitle, pendingItems, renderDashboard, repoMark } from './dashboard.js';
 import type { Db, StateJson } from './db.js';
 import { ensureMirror } from './git.js';
 import * as gh from './github.js';
@@ -35,7 +35,7 @@ const BotBlock = z.object({
   setup: z.array(z.string()).default([]),
   budget: z.object({ max_cost_per_call_usd: z.number().optional(), max_cost_per_month_usd: z.number().optional(), per_agent_usd: z.record(z.string(), z.number()).optional() }).default({}),
   limits: z.object({
-    max_attempts: z.number().optional(), max_open_prs: z.number().optional(),
+    max_attempts: z.number().optional(), max_open_prs: z.number().optional(), max_open_items: z.number().optional(),
   }).default({}),
   agent_timeout_min: z.number().optional(),
   gate_timeout_min: z.number().optional(),
@@ -290,30 +290,19 @@ export async function ciPublish(ctx: Ctx, opts: PublishOpts): Promise<string[]> 
     }
   }
 
-  // 1b. Item cards: one comment per pending decision, with its links.
-  if (dash) {
-    const itemKey = (id: string) => `item:${desk}:${repo}:${id}`;
-    const pending = new Set(pendingItems(db, repo).map((it) => it.id));
-    // Decided items: their card says so; new items get one.
-    for (const k of db.allKeys(`item:${desk}:${repo}:`)) {
-      const id = k.slice(`item:${desk}:${repo}:`.length);
-      if (pending.has(id)) continue;
-      const stale = id.startsWith('a') && actionStatus(db, id) === 'stale';
-      await gh.editComment(desk, Number(db.get(k)), `~~${id}~~ ${stale ? 'outdated, drafted again below' : 'decided'}`).catch(() => undefined);
-      db.set(k, null);
-    }
-    for (const it of pendingItems(db, repo)) {
-      if (db.get(itemKey(it.id))) continue;
-      try { db.set(itemKey(it.id), String(await gh.addComment(desk, dash.number, itemComment(it, desk, repo)))); }
-      catch (e) { log(`${it.id}: item comment not posted: ${shortError(e)}`); }
-    }
+  // 1b. Nothing waits for a decision: every drafted item (an issue to open, a fix, reply or rebase
+  // on an own PR, a reply or review for someone else) is carried out. Old item cards are deleted.
+  for (const k of db.allKeys(`item:${desk}:${repo}:`)) {
+    await gh.deleteComment(desk, Number(db.get(k))).catch(() => undefined);
+    db.set(k, null);
   }
-
-  // 2a. Proposals the agent can implement, on a repo that does not want to approve each one.
-  for (const p of db.proposals('pending', repo).filter((p) => db.get(`auto-approve:${p.id}`))) {
-    try { log(`p${p.id}: ${await approveProposal(ctx, p.id, { edit: false })}`); }
-    catch (e) { notes.push(`❌ p${p.id}: ${shortError(e)}`); }
-    db.set(`auto-approve:${p.id}`, null);
+  for (const it of pendingItems(db, repo)) {
+    const n = Number(it.id.slice(1));
+    const cmd: Command = it.id.startsWith('d')
+      ? { cmd: 'approve', id: it.id, flag: db.draft(n).target === 'pr' ? (/^changes/.test(db.draft(n).recommendation) ? 'changes' : undefined) : db.draft(n).take ? 'take' : undefined }
+      : { cmd: 'approve', id: it.id };
+    try { log(`${it.id}: ${await applyCommand(ctx, repo, cmd)}`); }
+    catch (e) { notes.push(`❌ ${it.id}: ${shortError(e)}`); }
   }
 
   // 2. PRs the agent step got ready.

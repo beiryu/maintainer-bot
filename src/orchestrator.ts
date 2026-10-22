@@ -133,7 +133,8 @@ export async function runOnce(ctx: Ctx, opts: RunOpts) {
       try {
         const digest = await sourceDigest(ctx, rc, log);
         const r = await runResearch(ctx, rc, digest, log);
-        events.push(`${rc.full_name}: research: ${r.added.length} new item(s), ${r.planned.length} issue(s) to open`);
+        events.push(r.skipped ? `${rc.full_name}: research skipped, ${r.skipped} items still open; done ones ticked`
+          : `${rc.full_name}: research: ${r.added.length} new item(s), ${r.planned.length} issue(s) to open`);
       } catch (e) {
         events.push(`${rc.full_name}: research failed: ${(e as Error).message.slice(0, 300)}`);
       }

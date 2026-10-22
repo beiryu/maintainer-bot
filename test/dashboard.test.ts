@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { DASHBOARD_MARK, dashboardChanged, itemComment, parseCommands, parseCommandTitle, pendingItems, renderDashboard } from '../src/dashboard.js';
+import { DASHBOARD_MARK, dashboardChanged, parseCommands, parseCommandTitle, pendingItems, renderDashboard } from '../src/dashboard.js';
 import { Db } from '../src/db.js';
 import { addFindings, researchItems, tickClosed, tickedIds, updateItems } from '../src/research.js';
 
@@ -57,51 +57,34 @@ describe('renderDashboard', () => {
     expect(await tickClosed(db, 'o/r', async (n) => n === 7)).toBe(1);
     expect(researchItems(db, 'o/r').map((i) => [i.done, i.note])).toEqual([[true, '#7 closed'], [false, '']]);
   });
-  it('lists every decision with the command that approves it, one line each, and the rest as status', () => {
+  it('shows status only: open PRs, work in progress and what is stuck, no decisions', () => {
     const { db, a, p, d1, d2 } = populated();
     const body = renderDashboard(db, cfg, { repo: 'o/r', monthCostUsd: 1.25, monthLimitUsd: 50, now: Date.parse('2026-10-21T10:00:00Z') });
     expect(body.startsWith(`${DASHBOARD_MARK}\n<!-- maintainer-bot:repo o/r -->`)).toBe(true);
     expect(body).toContain('_Updated 2026-10-21 10:00 UTC · $1.25/$50 this month_');
-    expect(body).toContain(`- **p${p}** new issue: core: negative amounts unhandled (RM-013)`);
-
-    expect(body).toContain(`- **a${a}** fix + reply on [#20](https://github.com/o/r/pull/20)`);
-    expect(body).toContain(`- **d${d1}** reply [#31](https://github.com/o/r/issues/31) @someone`);
-    expect(body).toContain(`- **d${d2}** review [#32](https://github.com/o/r/pull/32) @other`);
-    expect(body).toContain('Each item below has 👍 Approve / 👎 Reject links.');
-    const items = pendingItems(db, 'o/r');
-    expect(items.map((i) => i.id)).toEqual([`p${p}`, `a${a}`, `d${d1}`, `d${d2}`]);
-    const card = (id: string) => itemComment(items.find((i) => i.id === id)!, 'me/desk', 'o/r');
-    expect(card(`p${p}`)).toContain('  **Problem**\n  Body <!- - evil -->');
-    expect(card(`p${p}`)).toContain(`[👍 Approve](https://github.com/me/desk/issues/new?title=%2Fapprove%20p${p}%20(o%2Fr)) · [👎 Reject](https://github.com/me/desk/issues/new?title=%2Freject%20p${p}%20(o%2Fr))`);
-    expect(card(`d${d1}`)).toContain('title=%2Fapprove%20d' + d1 + '%20--take%20(o%2Fr)');
-    expect(card(`d${d2}`)).toContain('title=%2Fapprove%20d' + d2 + '%20--changes%20(o%2Fr)');
-    expect(card(`a${a}`)).toContain('> Fixed the null case.');
-    expect(card(`a${a}`)).not.toContain('for you only');
-    expect(card(`d${d1}`)).toContain('🚀 Approve and also assign it to you');
-    expect(card(`d${d2}`)).toContain('🚀 Approve and post as "request changes"');
-    // The card's copy block is a command only once the maintainer posts it; the card itself is skipped by marker.
+    expect(body).not.toContain('Approve');
+    expect(body).not.toContain('### To decide');
+    // What publish carries out on its own.
+    expect(pendingItems(db, 'o/r').map((i) => i.id)).toEqual([`p${p}`, `a${a}`, `d${d1}`, `d${d2}`]);
     expect(body).toContain('- [#20](https://github.com/o/r/pull/20) ❌ fix(x): thing · changes requested');
     expect(body).toContain('- [#2](https://github.com/o/r/issues/2) issue 2 · coded');
-    expect(body).toContain('- [#3](https://github.com/o/r/issues/3) stopped: coder gave up: needs a decision → `/retry #3`');
-    // Nothing the bot writes reads as a command.
+    expect(body).toContain('### Stuck\n\n- [#3](https://github.com/o/r/issues/3) stopped: coder gave up: needs a decision');
     expect(parseCommands(body)).toEqual([]);
   });
-  it('offers a retry link for a PR whose rebase gave up', () => {
+  it('lists a PR whose rebase gave up as stuck', () => {
     const { db } = populated();
     const issue = db.issueByNumber('o/r', 1)!.id;
     db.updatePr(issue, { mergeable: 'CONFLICTING' });
     db.set(`rebase-tried:${issue}`, 'abc');
-    expect(renderDashboard(db, cfg, { repo: 'o/r', desk: 'o/desk' })).not.toContain('my rebase did not get through'); // a fix is still pending
+    expect(renderDashboard(db, cfg, { repo: 'o/r' })).not.toContain('rebase did not get through'); // a fix is still pending
     db.setActionStatus(db.pendingActionFor(issue)!.id, 'rejected');
-    const body = renderDashboard(db, cfg, { repo: 'o/r', desk: 'o/desk' });
-    expect(body).toMatch(/#20\]\(https:\/\/github.com\/o\/r\/pull\/20\) conflicts with the base and my rebase did not get through → \[🔁 Retry\]\(https:\/\/github.com\/o\/desk\/issues\/new\?title=/);
-    expect(parseCommands(body)).toEqual([]);
+    expect(renderDashboard(db, cfg, { repo: 'o/r' })).toContain('- [#20](https://github.com/o/r/pull/20) conflicts with the base and the rebase did not get through');
   });
-  it('says so when nothing waits, and warns about an expiring token', () => {
+  it('warns about an expiring token and has no empty sections', () => {
     const db = new Db(':memory:');
     const body = renderDashboard(db, cfg, { repo: 'o/r', tokenExpiry: '2026-10-30', now: Date.parse('2026-10-21T00:00:00Z') });
-    expect(body).toContain('_Nothing._');
     expect(body).not.toContain('### Open PRs');
+    expect(body).not.toContain('### Stuck');
     expect(body).toContain('MAINTAINER_TOKEN expires in 9 days');
   });
   it('ignores the timestamp when deciding whether to re-post', () => {
@@ -138,5 +121,18 @@ describe('parseCommands', () => {
       { cmd: 'approve', id: 'd2', flag: 'take' },
       { cmd: 'approve', id: 'd3', flag: 'changes' },
     ]);
+  });
+});
+
+describe('runResearch', () => {
+  it('only ticks done items when more than max_open_items are open', async () => {
+    const { runResearch } = await import('../src/plan.js');
+    const db = new Db(':memory:');
+    addFindings(db, 'o/r', Array.from({ length: 21 }, (_, k) => ({ title: `item ${k}`, detail: '', evidence: [] })), 't');
+    const ctx = { db, cfg: { limits: { max_open_items: 20 } }, runId: null } as never;
+    const r = await runResearch(ctx, { full_name: 'o/r', notes: '' } as never, '', () => undefined);
+    expect(r).toEqual({ added: [], planned: [], skipped: 21 });
+    expect(JSON.parse(db.get('researched:o/r')!)).toMatchObject({ added: 0, skipped: 21 });
+    expect(renderDashboard(db, cfg, { repo: 'o/r' })).toContain('only ticked done items (too many open)');
   });
 });
