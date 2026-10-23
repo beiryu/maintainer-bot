@@ -44,7 +44,7 @@ your machine; you follow it on a pinned **Maintainer Dashboard** issue, from the
 ```
 event (issue assigned to you, review comment, CI failed, a /command on the dashboard)  → audit
 schedules (the caller's crons) → research (twice a day) or audit (hourly)
-outside bot.hours (e.g. "9-21" in bot.timezone) a run stops at once, unless started by hand
+outside bot.hours (e.g. "9-21" in bot.timezone) an event run stops at once; by hand or by cron it always runs
   ▼
 agent job    read-only token + the model credential → agents, gate, reviewer → state file
   ▼

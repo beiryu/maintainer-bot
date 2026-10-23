@@ -13,8 +13,9 @@
 #
 # Every event runs the audit (issues and PRs, up to max_open_prs). Research (web, newcomer
 # tryout, code review, then the issues to open next) runs when the caller passes `task: research`. Outside the
-# config's working hours (`bot.hours`) a run stops after reading the config, unless started by
-# hand; the next run in hours picks up what came in meanwhile. The dashboard is written by the bot only and its edits
+# config's working hours (`bot.hours`) an event run stops after reading the config; a run started
+# by hand or by the caller's cron always works (the cron already sets the hours, and GitHub can
+# start a scheduled run hours late); the next run in hours picks up what came in meanwhile. The dashboard is written by the bot only and its edits
 # start no run (callers do not subscribe to `issues: edited`): decisions come as comments.
 name: maintainer-bot
 
@@ -82,7 +83,7 @@ jobs:
       - name: Working hours
         id: hours
         run: |
-          if [ "$GITHUB_EVENT_NAME" = workflow_dispatch ] || [ "${{ steps.cfg.outputs.open }}" = true ]; then
+          if [ "$GITHUB_EVENT_NAME" = workflow_dispatch ] || [ "$GITHUB_EVENT_NAME" = schedule ] || [ "${{ steps.cfg.outputs.open }}" = true ]; then
             echo "open=true" >> "$GITHUB_OUTPUT"
           else
             echo "open=false" >> "$GITHUB_OUTPUT"; echo "Outside working hours: nothing to do until the next run in hours."
