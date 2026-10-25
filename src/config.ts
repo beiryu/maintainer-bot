@@ -81,11 +81,8 @@ const Config = z.object({
   // github_user); no key is needed, which is what a runner wants.
   push_via: z.enum(['git', 'api']).default('git'),
   repos: z.array(RepoConfig).default([]),
+  // No cap on open PRs, issues being worked on or research items: the bot takes everything it finds.
   limits: z.object({
-    // The only limit on how much the bot works: open PRs plus issues being worked on, per repo.
-    max_open_prs: z.number().default(10),
-    // With more open research items than this, a research run only ticks what is done.
-    max_open_items: z.number().default(20),
     // A run stops before cloning or building when the disk holding work/ has less free space.
     min_free_disk_gb: z.number().default(15),
     // After each run the least recently used Go build output is dropped while the cache is past this (modules stay).

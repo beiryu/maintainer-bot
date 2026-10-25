@@ -172,7 +172,7 @@ export function researchSection(db: Db, repo: string, room = 50_000): string[] {
   const items = researchItems(db, repo);
   if (!items.length) return [];
   const run = db.get(`researched:${repo}`);
-  const last = run ? JSON.parse(run) as { at: string; added: number; planned?: number; skipped?: number } : null;
+  const last = run ? JSON.parse(run) as { at: string; added: number; planned?: number } : null;
   const open = items.filter((i) => !i.done).length;
   const link = (n: number) => `[#${n}](https://github.com/${repo}/issues/${n})`;
   const line = (i: ResearchItem) => {
@@ -190,7 +190,7 @@ export function researchSection(db: Db, repo: string, room = 50_000): string[] {
   let size = 0;
   const shown = lines.filter((l) => (size += l.length + 1) <= room);
   const L = ['### Research', '',
-    `_${open} open · ${items.length - open} done${last ? ` · last run ${last.at.replace('T', ' ').slice(0, 16)} UTC: ${last.skipped ? 'only ticked done items (too many open)' : `${last.added} new, ${last.planned ?? 0} issue(s) opened`}` : ''}. Tick what is done._`, '',
+    `_${open} open · ${items.length - open} done${last ? ` · last run ${last.at.replace('T', ' ').slice(0, 16)} UTC: ${last.added} new, ${last.planned ?? 0} issue(s) opened` : ''}. Tick what is done._`, '',
     ...shown];
   if (shown.length < lines.length) L.push(`- … ${lines.length - shown.length} older done item(s) not shown (issue size limit)`);
   L.push('');

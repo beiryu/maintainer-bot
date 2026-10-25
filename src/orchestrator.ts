@@ -53,7 +53,7 @@ export function withLock<T>(fn: () => Promise<T>, lock = 'data/run.lock'): Promi
 // ---------------------------------------------------------------- main loop
 
 // A run does one task. `audit` works the issues and PRs: follow-ups (CI, reviews, conflicts),
-// other people's issues and PRs, and as many open issues as fit under limits.max_open_prs.
+// other people's issues and PRs, and every open issue assigned to the bot (no cap).
 // `research` keeps the research list and opens the issues to work on next (see plan.ts).
 export type Task = 'audit' | 'research';
 export interface RunOpts { dry: boolean; repo?: string; issue?: number; triageOnly?: boolean; task?: Task }
@@ -133,8 +133,7 @@ export async function runOnce(ctx: Ctx, opts: RunOpts) {
       try {
         const digest = await sourceDigest(ctx, rc, log);
         const r = await runResearch(ctx, rc, digest, log);
-        events.push(r.skipped ? `${rc.full_name}: research skipped, ${r.skipped} items still open; done ones ticked`
-          : `${rc.full_name}: research: ${r.added.length} new item(s), ${r.planned.length} issue(s) to open`);
+        events.push(`${rc.full_name}: research: ${r.added.length} new item(s), ${r.planned.length} issue(s) to open`);
       } catch (e) {
         events.push(`${rc.full_name}: research failed: ${(e as Error).message.slice(0, 300)}`);
       }
@@ -199,21 +198,18 @@ export function triagePriority(issue: { title: string }): number {
 }
 
 async function discoverAndTriage(ctx: Ctx, rc: RepoConfig, triageOnly = false): Promise<string | null> {
-  const { cfg, db } = ctx;
+  const { db } = ctx;
 
-  // The only limit: open PRs plus issues being worked on stay within max_open_prs.
-  const room = () => cfg.limits.max_open_prs - db.openPrCount(rc.full_name) - db.inFlightCount(rc.full_name);
+  // No cap on open PRs or issues being worked on: every triaged issue is taken.
   const promoteQueued = async () => {
     for (const t of db.issuesInState('triaged', rc.full_name).sort((a, b) => (b.score ?? 0) - (a.score ?? 0))) {
-      if (room() <= 0) return;
       const why = await unavailable(rc, await gh.getIssue(rc.full_name, t.number));
       if (why) { db.skip(t.id, why); continue; }
       await promote(ctx, rc, t);
     }
   };
-  // Already-triaged issues waiting for room come first; re-check that they are still open.
+  // Already-triaged issues come first; re-check that they are still open.
   if (!triageOnly) await promoteQueued();
-  if (!triageOnly && room() <= 0) return null;
 
   const issues = await gh.listOpenIssues(rc.full_name, rc.labels);
   db.markScanned(rc.full_name);
@@ -756,7 +752,7 @@ export async function approveProposal(ctx: Ctx, id: number, opts: { edit: boolea
   const created = await gh.createIssue(p.repo, { title, body, labels, assignees: [cfg.github_user] });
   db.insertDiscovered({ repo: p.repo, number: created.number, title, body, url: created.url });
   const issue = db.issueByNumber(p.repo, created.number)!;
-  // No triage: it waits in the queue for room under max_open_prs.
+  // No triage: the next audit run takes it.
   db.transition(issue.id, 'triaged', { score: 1, triage_reason: p.rationale });
   db.updateProposal(id, { status: 'filed', title, body, issue_number: created.number, issue_id: issue.id });
   return `opened #${created.number}, assigned to you`;

@@ -7,7 +7,6 @@ commit_signing_key: ~/.ssh/YOUR_signing_key
 repos: []
 
 limits:
-  max_open_prs: 10            # the only limit: open PRs + issues being worked on, per repo
   max_attempts: 3
   max_go_build_cache_gb: 6
 

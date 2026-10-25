@@ -93,8 +93,7 @@ const norm = (t: string) => t.toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim();
 
 /**
  * The research job, twice a day. In order:
- *   1. tick the list items whose issue was closed; with more than limits.max_open_items items
- *      still open, stop there (the list is worked down before it grows);
+ *   1. tick the list items whose issue was closed;
  *   2. three agents look at the project (web research, a newcomer's tryout, a code review) with
  *      the whole list in hand, and what they find that is not on it yet is added;
  *   3. the planner decides what to work on next and writes it as issues, as many as are worth
@@ -102,18 +101,12 @@ const norm = (t: string) => t.toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim();
  *      on them) unless only a person can do the work.
  * A step that fails is reported, not fatal.
  */
-export async function runResearch(ctx: Ctx, rc: RepoConfig, sourceDigest = '', log: (m: string) => void = console.log): Promise<{ added: ResearchItem[]; planned: Proposal[]; skipped?: number }> {
+export async function runResearch(ctx: Ctx, rc: RepoConfig, sourceDigest = '', log: (m: string) => void = console.log): Promise<{ added: ResearchItem[]; planned: Proposal[] }> {
   const { db } = ctx;
   const repo = rc.full_name;
   log(`${repo}: research`);
   const ticked = await tickClosed(db, repo, async (n) => (await gh.getIssue(repo, n)).state !== 'OPEN');
   if (ticked) log(`${repo}: ${ticked} item(s) done, their issue closed`);
-  const open = researchItems(db, repo).filter((i) => !i.done).length;
-  if (open > ctx.cfg.limits.max_open_items) {
-    log(`${repo}: ${open} open items (more than ${ctx.cfg.limits.max_open_items}); only ticking done ones this time`);
-    db.set(`researched:${repo}`, JSON.stringify({ at: new Date().toISOString(), added: 0, planned: 0, skipped: open }));
-    return { added: [], planned: [], skipped: open };
-  }
 
   const notes = rc.notes.trim() ? `Project conventions:\n${rc.notes.trim()}` : '';
   const a = await gatherAuditContext(ctx, rc, sourceDigest);

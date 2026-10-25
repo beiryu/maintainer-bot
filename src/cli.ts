@@ -42,7 +42,7 @@ const days = (d: number) => new Date(Date.now() - d * 86_400_000).toISOString();
 const log = (m: string) => console.log(`${new Date().toISOString()} ${m}`);
 
 program.command('run').alias('audit')
-  .description('the audit: follow up open PRs, other people\'s issues and PRs, work open issues assigned to you (up to max_open_prs)')
+  .description('the audit: follow up open PRs, other people\'s issues and PRs, work every open issue assigned to you')
   .option('--dry', 'work on an issue without touching GitHub (no labels, no comments, no PR)')
   .option('--repo <owner/name>')
   .option('--issue <number>', 'work on this issue only (needs --repo)', Number)

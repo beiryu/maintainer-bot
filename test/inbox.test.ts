@@ -3,7 +3,7 @@ import { Db } from '../src/db.js';
 import { summarizeChecks } from '../src/github.js';
 import { needsYou, renderInbox } from '../src/inbox.js';
 
-const cfg = { repos: [{ full_name: 'o/r', sources: [] }], limits: { max_open_prs: 10 } } as never;
+const cfg = { repos: [{ full_name: 'o/r', sources: [] }], limits: {} } as never;
 
 describe('summarizeChecks', () => {
   it('pending beats failure beats success', () => {

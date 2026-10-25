@@ -22,7 +22,7 @@ dashboard shows status only, nothing waits for a decision there.
 research: closed issues ─▶ items ticked; researcher + tryout + inspector ─▶ new items r<n> on the list
           sources ─(watch)─▶ upstream digest ─┐
           research list ─(planner)────────────┴▶ GitHub issues (assigned to you unless only a person can do it)
-audit:    open issue assigned to you, while open PRs + work in progress < max_open_prs (10)
+audit:    every open issue assigned to you (no cap on open PRs or work in progress)
           ─▶ claimed ─▶ reproduced ─▶ coded ─▶ gated ─▶ reviewed ─▶ pr_open ─(you merge)─▶ done
                            when it gives up: a short comment on the issue says why, and it is listed on the dashboard
 open PR: CI failed / review comments / behind base ─(followup agent)─▶ fix, reply or rebase ─▶ pushed
@@ -102,7 +102,7 @@ npm run -s maintainer-bot -- inbox
 
 | Command | What it does |
 | --- | --- |
-| `run` (`audit`) | follow up open PRs → other people's issues/PRs → work open issues assigned to you, up to `max_open_prs` → open PRs |
+| `run` (`audit`) | follow up open PRs → other people's issues/PRs → work every open issue assigned to you → open PRs |
 | `take <n> [--repo R]` | assign issue #n to you; the next run implements it |
 | `run --repo R --issue N [--dry]` | one issue; `--dry` stops after review, `approve <id>` then opens the PR |
 | `run --triage-only` | scoring only |

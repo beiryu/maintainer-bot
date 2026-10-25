@@ -3,7 +3,7 @@ import { DASHBOARD_MARK, dashboardChanged, parseCommands, parseCommandTitle, pen
 import { Db } from '../src/db.js';
 import { addFindings, researchItems, tickClosed, tickedIds, updateItems } from '../src/research.js';
 
-const cfg = { repos: [{ full_name: 'o/r', sources: [] }], limits: { max_open_prs: 10 }, budget: { max_cost_per_call_usd: 3 } } as never;
+const cfg = { repos: [{ full_name: 'o/r', sources: [] }], limits: {}, budget: { max_cost_per_call_usd: 3 } } as never;
 
 function populated() {
   const db = new Db(':memory:');
@@ -121,18 +121,5 @@ describe('parseCommands', () => {
       { cmd: 'approve', id: 'd2', flag: 'take' },
       { cmd: 'approve', id: 'd3', flag: 'changes' },
     ]);
-  });
-});
-
-describe('runResearch', () => {
-  it('only ticks done items when more than max_open_items are open', async () => {
-    const { runResearch } = await import('../src/plan.js');
-    const db = new Db(':memory:');
-    addFindings(db, 'o/r', Array.from({ length: 21 }, (_, k) => ({ title: `item ${k}`, detail: '', evidence: [] })), 't');
-    const ctx = { db, cfg: { limits: { max_open_items: 20 } }, runId: null } as never;
-    const r = await runResearch(ctx, { full_name: 'o/r', notes: '' } as never, '', () => undefined);
-    expect(r).toEqual({ added: [], planned: [], skipped: 21 });
-    expect(JSON.parse(db.get('researched:o/r')!)).toMatchObject({ added: 0, skipped: 21 });
-    expect(renderDashboard(db, cfg, { repo: 'o/r' })).toContain('only ticked done items (too many open)');
   });
 });

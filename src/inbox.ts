@@ -84,12 +84,10 @@ export function renderInbox(db: Db, cfg: Config): string {
   });
   sections.push(`ĐANG LÀM\n${workLines.join('\n') || '  (không có)'}`);
 
-  // Scored and waiting for their repo's slot; the best per repo is taken first.
+  // Scored and waiting for the next audit run; the best per repo is taken first.
   const queued = db.allIssues().filter((i) => i.state === 'triaged').sort((a, b) => (b.score ?? 0) - (a.score ?? 0));
-  const queueLines = queued.slice(0, 12).map((i) => {
-    const full = db.openPrCount(i.repo) + db.inFlightCount(i.repo) >= cfg.limits.max_open_prs ? `  (chờ: repo đã đủ ${cfg.limits.max_open_prs} PR/issue đang làm)` : '';
-    return `  ${pad(`${short(i.repo)}#${i.number}`, 22)} ${(i.score ?? 0).toFixed(2)}  ${i.title.slice(0, 50)}${full}`;
-  });
+  const queueLines = queued.slice(0, 12).map((i) =>
+    `  ${pad(`${short(i.repo)}#${i.number}`, 22)} ${(i.score ?? 0).toFixed(2)}  ${i.title.slice(0, 50)}`);
   if (queued.length > queueLines.length) queueLines.push(`  … và ${queued.length - queueLines.length} issue khác (status --all)`);
   sections.push(`HÀNG CHỜ\n${queueLines.join('\n') || '  (không có)'}`);
 
