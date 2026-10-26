@@ -9,6 +9,7 @@ export interface SandboxRun {
   outDir?: string;             // host dir mounted at /out (runtime outputs)
   cmd: string[];               // command run inside the container
   env?: Record<string, string>;
+  input?: string;              // written to the command's stdin
   timeoutMin: number;
 }
 
@@ -45,7 +46,7 @@ export function dockerArgs(cfg: Config, run: SandboxRun, name?: string): string[
  * On a runner the command runs as is, in the run's directory; its process tree is killed.
  */
 export async function execSandbox(cfg: Config, run: SandboxRun, opts: { all?: boolean } = {}) {
-  const common = { reject: false, all: opts.all, timeout: run.timeoutMin * 60_000, env: sandboxEnv(run) } as const;
+  const common = { reject: false, all: opts.all, input: run.input, timeout: run.timeoutMin * 60_000, env: sandboxEnv(run) } as const;
   if (cfg.sandbox.mode === 'runner') {
     const [file, ...args] = run.cmd;
     return execa(file, args, { ...common, cwd: run.dir, forceKillAfterDelay: 5000 });

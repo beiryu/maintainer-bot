@@ -167,6 +167,8 @@ interface RunUsage { cost: number | null; inputTokens: number | null; outputToke
 interface RunTrace extends RunUsage { lastTools: string[] }
 interface RuntimeRun {
   argv: string[];
+  /** The prompt, on stdin: as an argument it can pass Linux's 128 KB limit for one argument (E2BIG). */
+  input: string;
   env?: Record<string, string>;
   parse: (stdout: string, outDir: string) => RunUsage & { text: string };
   /** What a run that died before answering (timeout, crash) got through, read from its live log. */
@@ -186,7 +188,7 @@ function claudeRun(cfg: Config, access: Access, maxTurns: number, prompt: string
   const tools = access === WRITE ? ['Read', 'Grep', 'Glob', 'Edit', 'Write', 'Bash'] : ['Read', 'Grep', 'Glob'];
   return {
     argv: [
-      'claude', '-p', prompt,
+      'claude', '-p',
       '--output-format', 'json',
       '--max-turns', String(maxTurns),
       '--max-budget-usd', String(cfg.budget.max_cost_per_call_usd),
@@ -196,6 +198,7 @@ function claudeRun(cfg: Config, access: Access, maxTurns: number, prompt: string
       '--allowedTools', tools.join(','),
       ...(cfg.sandbox.model ? ['--model', cfg.sandbox.model] : []),
     ],
+    input: prompt,
     parse(stdout) {
       const out = ClaudeOutput.parse(JSON.parse(stdout));
       if (out.is_error) throw new AgentError(`claude error (${out.subtype}): ${out.result.slice(0, 500)}`);
@@ -290,7 +293,7 @@ function copilotRun(cfg: Config, access: Access, prompt: string, out: string, o:
   const allow = access === WRITE ? ['read', 'write', 'shell'] : ['read'];
   return {
     argv: [
-      'copilot', '-p', prompt, '-s',
+      'copilot', '-s',
       '--no-auto-update', '--no-ask-user', '--no-color',
       // The built-in GitHub MCP server would act with the token; agents never talk to GitHub.
       '--disable-builtin-mcps',
@@ -307,6 +310,7 @@ function copilotRun(cfg: Config, access: Access, prompt: string, out: string, o:
       ...(o.model ?? cfg.sandbox.model ? [`--model=${o.model ?? cfg.sandbox.model}`] : []),
       ...(o.effort ? [`--reasoning-effort=${o.effort}`] : []),
     ],
+    input: prompt,
     // Copilot's state dir, session log included, lands in the out dir so it survives a killed run.
     env: { COPILOT_HOME: `${out}/copilot` },
     trace: copilotTrace,
@@ -346,7 +350,7 @@ export async function runAgent<A extends AgentName>(ctx: { cfg: Config; db: Db; 
   const startedAt = new Date().toISOString();
   const started = Date.now();
   const sandboxRun = {
-    dir: opts.workdir, readOnly: opts.readOnly, outDir, cmd: run.argv,
+    dir: opts.workdir, readOnly: opts.readOnly, outDir, cmd: run.argv, input: run.input,
     env: { ...run.env, [cfg.sandbox.auth_env]: token }, timeoutMin: cfg.sandbox.agent_timeout_min,
   };
   const r = await execSandbox(cfg, sandboxRun);
@@ -356,12 +360,14 @@ export async function runAgent<A extends AgentName>(ctx: { cfg: Config; db: Db; 
   let error: string | undefined;
   let trace: RunTrace | null = null;
   try {
+    // A command that never started (E2BIG, ENOENT) has no output at all.
+    if (r.stdout === undefined) throw new AgentError(r.shortMessage ?? r.message ?? 'did not start');
     out = run.parse(r.stdout, outDir);
     if (r.exitCode !== 0) throw new AgentError(`exit ${r.exitCode}: ${out.text.slice(-500)}`);
     parsed = def.schema.parse(extractLastJson(out.text)) as AgentResult<A>;
   } catch (e) {
     error = r.timedOut ? 'timed out' : String(e instanceof Error ? e.message : e);
-    error += `\nstderr: ${r.stderr.slice(-1000)}`;
+    error += `\nstderr: ${(r.stderr ?? '').slice(-1000)}`;
     try { trace = run.trace?.(outDir) ?? null; } catch { /* no log, nothing to add */ }
   } finally {
     rmSync(outDir, { recursive: true, force: true });
@@ -374,7 +380,7 @@ export async function runAgent<A extends AgentName>(ctx: { cfg: Config; db: Db; 
     inputTokens: usage?.inputTokens ?? null, outputTokens: usage?.outputTokens ?? null,
     costUsd: usage?.cost ?? null, ok: !error, models: usage?.models ?? [],
     resultJson: JSON.stringify(error
-      ? { error, result: out?.text ?? r.stdout.slice(-4000), ...(trace ? { lastTools: trace.lastTools } : {}) }
+      ? { error, result: out?.text ?? (r.stdout ?? '').slice(-4000), ...(trace ? { lastTools: trace.lastTools } : {}) }
       : { parsed, result: out!.text }),
   });
   if (error && trace?.lastTools.length) error += `\nlast steps:\n${trace.lastTools.slice(-5).join('\n')}`;
