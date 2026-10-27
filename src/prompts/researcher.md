@@ -4,6 +4,8 @@ what it does and for whom. You can fetch web pages.
 
 {{repo_notes}}
 
+{{focus}}
+
 Find what the owner should know to make the project more useful and more used. Go wide, then
 deep on what matters. For example:
 

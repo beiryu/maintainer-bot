@@ -16,6 +16,28 @@ const untrusted = (s: string, max = 40_000) => s.replace(/<\/?(untrusted|rules|r
 // The research list grows without a cap; agents read it whole.
 const LIST_MAX = 400_000;
 
+// What the researcher and the planner are told to aim at, by the repo's `focus`.
+const FOCUS: Record<'researcher' | 'planner', Record<RepoConfig['focus'], string>> = {
+  researcher: {
+    features: `This phase is about building features. Look only for what to build next: what similar
+projects offer that this one lacks, what users ask for, parts of the domain the project does
+not cover yet, integrations its audience uses. Skip listings, marketplaces, outreach and code
+defects.`,
+    all: '',
+  },
+  planner: {
+    features: `## Focus: features
+
+This phase is about building features, fast. Plan the features the implementer can build now,
+each a capability users get (kind feature or roadmap), the most useful first. Plan a fix only
+when users get a wrong result or a crash on normal input. Leave everything else out (error
+messages, hints, warnings, keywords, docs polish, tests, listings, outreach, decisions only a
+person can make) and leave its items open: they are for a later phase. A feature that needs a
+fact the repository does not contain is still left out.`,
+    all: '',
+  },
+};
+
 /** `git ls-files` folded into "dir/ (n files)" lines, two levels deep, so the agent sees the shape without the noise. */
 export function layoutSummary(paths: string[]): string {
   const counts = new Map<string, number>();
@@ -95,9 +117,10 @@ const norm = (t: string) => t.toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim();
  * The research job, twice a day. In order:
  *   1. tick the list items whose issue was closed;
  *   2. three agents look at the project (web research, a newcomer's tryout, a code review) with
- *      the whole list in hand, and what they find that is not on it yet is added;
+ *      the whole list in hand, and what they find that is not on it yet is added; with
+ *      `focus: features` only the web research runs, looking for features to build;
  *   3. the planner decides what to work on next and writes it as issues, as many as are worth
- *      doing. The publish step files them: assigned to the maintainer (so the audit runs work
+ *      doing (with `focus: features`, features only, plus fixes for wrong results and crashes). The publish step files them: assigned to the maintainer (so the audit runs work
  *      on them) unless only a person can do the work.
  * A step that fails is reported, not fatal.
  */
@@ -117,7 +140,7 @@ export async function runResearch(ctx: Ctx, rc: RepoConfig, sourceDigest = '', l
     `Open issues:\n${a.open_issues}`, `Open pull requests:\n${a.open_prs}`,
     `Issues already planned, with the owner's decision:\n${a.previous}`, `Recent commits:\n${a.recent_commits}`,
   ].join('\n\n'), LIST_MAX);
-  const vars = { repo, default_branch: rc.default_branch, repo_notes: notes, traction: a.traction, known };
+  const vars = { repo, default_branch: rc.default_branch, repo_notes: notes, traction: a.traction, known, focus: FOCUS.researcher[rc.focus] };
   const head = await git(mirrorDir(repo), ['rev-parse', 'HEAD']);
   const scratch = async (name: string) => {
     const dir = join('work', slug(repo), `_research-${name}`);
@@ -133,11 +156,13 @@ export async function runResearch(ctx: Ctx, rc: RepoConfig, sourceDigest = '', l
     } catch (e) { log(`${repo}: ${agent} failed: ${(e as Error).message.split('\n')[0]}`); }
   };
   await step('researcher', async () => mirrorDir(repo), true);
-  await step('tryout', () => scratch('tryout'), false);
-  await step('inspector', () => scratch('inspector'), false);
+  if (rc.focus === 'all') {
+    await step('tryout', () => scratch('tryout'), false);
+    await step('inspector', () => scratch('inspector'), false);
+  }
   log(`${repo}: ${added.length} new item(s)`);
 
-  const planned = await plan(ctx, rc, { ...a, research: untrusted(itemsForAgents(researchItems(db, repo), { issueOf }), LIST_MAX) }, log);
+  const planned = await plan(ctx, rc, { ...a, focus: FOCUS.planner[rc.focus], research: untrusted(itemsForAgents(researchItems(db, repo), { issueOf }), LIST_MAX) }, log);
   db.set(`researched:${repo}`, JSON.stringify({ at: new Date().toISOString(), added: added.length, planned: planned.length }));
   return { added, planned };
 }

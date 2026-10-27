@@ -45,6 +45,10 @@ const RepoConfig = z.object({
   // Project conventions the agents must follow beyond what they read in the repo. Also the
   // reviewer's checklist and part of what the planner measures the repo against.
   notes: z.string().default(''),
+  // What research looks for. features: the next features to build (the web research only;
+  // the newcomer tryout and code review, which mostly find fixes, are skipped) and the planner
+  // opens a fix only for a wrong result or a crash. all: features, fixes, polish and outreach.
+  focus: z.enum(['features', 'all']).default('features'),
   // Bot accounts whose inline review comments count as feedback, e.g. "github-actions[bot]".
   review_bots: z.array(z.string()).default([]),
   // Commands run after the commit, in a clone with full history, before pushing; what they

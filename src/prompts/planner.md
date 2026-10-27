@@ -15,6 +15,8 @@ is based on.
 
 {{repo_notes}}
 
+{{focus}}
+
 ## What you have
 
 Project rules and documents, read them first:

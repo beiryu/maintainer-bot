@@ -25,6 +25,7 @@ forbidden_paths: [".github/", "pnpm-lock.yaml"]
 pr_types: [feat, fix, docs, test, refactor, chore]
 pr_scopes: []
 audit_files: [README.md, CONTRIBUTING.md, AGENTS.md]
+focus: features                    # features: research finds features to build; all: fixes, polish and outreach too
 sources: []
 notes: |
   Conventional Commits. End every new file with a newline.

@@ -20,6 +20,7 @@ dashboard shows status only, nothing waits for a decision there.
 
 ```
 research: closed issues ─▶ items ticked; researcher + tryout + inspector ─▶ new items r<n> on the list
+          (focus: features, the default: the researcher alone, and the planner opens features only)
           sources ─(watch)─▶ upstream digest ─┐
           research list ─(planner)────────────┴▶ GitHub issues (assigned to you unless only a person can do it)
 audit:    every open issue assigned to you (no cap on open PRs or work in progress)
