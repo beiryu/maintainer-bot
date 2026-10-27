@@ -28,6 +28,9 @@ const Findings = z.object({
   summary: z.string().default(''),
 });
 
+// A title over 120 characters is cut at a word, not a reason to throw the whole answer away.
+export const Title = z.string().transform((t) => (t.length <= 120 ? t : `${t.slice(0, 119).replace(/\s+\S*$/, '')}…`));
+
 export const AGENTS = {
   // Research, step 1: what is happening outside the repository. The only agent with the web.
   researcher: { access: READ, web: true, maxTurns: 80, schema: Findings },
@@ -65,7 +68,7 @@ export const AGENTS = {
   'pr-writer': {
     access: READ, maxTurns: 8,
     schema: z.object({
-      title: z.string().max(120), body: z.string(),
+      title: Title, body: z.string(),
       // Candidate "why" sentences the human picks from (or rewrites) at approve time.
       why: z.array(z.object({ en: z.string(), vi: z.string() })).max(2).default([]),
     }),
@@ -79,7 +82,7 @@ export const AGENTS = {
     access: READ, maxTurns: 40,
     schema: z.object({
       issues: z.array(z.object({
-        title: z.string().max(120),
+        title: Title,
         body: z.string(),
         labels: z.array(z.string()).default([]),
         kind: z.enum(['feature', 'growth', 'bug', 'gap', 'docs', 'test', 'data', 'consistency', 'roadmap']).catch('gap'),

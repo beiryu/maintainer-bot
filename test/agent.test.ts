@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { AGENTS, extractLastJson, fillTemplate, parseCopilotEvents, parseCopilotUsage, safeTestVars } from '../src/agent.js';
+import { AGENTS, extractLastJson, fillTemplate, parseCopilotEvents, parseCopilotUsage, safeTestVars, Title } from '../src/agent.js';
 
 describe('fillTemplate', () => {
   it('replaces known vars and leaves unknown ones', () => {
@@ -84,5 +84,14 @@ describe('deep audit agents', () => {
     expect('web' in AGENTS.planner).toBe(false);
     const r = AGENTS.inspector.schema.parse({ findings: [{ title: 't', detail: 'd', evidence: ['$ x', 'out'] }] });
     expect(r).toEqual({ findings: [{ title: 't', detail: 'd', evidence: ['$ x', 'out'] }], summary: '' });
+  });
+});
+
+describe('Title', () => {
+  it('keeps a short title and cuts a long one at a word', () => {
+    expect(Title.parse('vn-holidays: count working days')).toBe('vn-holidays: count working days');
+    const long = Title.parse(`feat: ${'word '.repeat(40)}`);
+    expect(long.length).toBeLessThanOrEqual(120);
+    expect(long).toMatch(/word…$/);
   });
 });
