@@ -22,7 +22,13 @@ const FOCUS: Record<'researcher' | 'planner', Record<RepoConfig['focus'], string
     features: `This phase is about building features. Look only for what to build next: what similar
 projects offer that this one lacks, what users ask for, parts of the domain the project does
 not cover yet, integrations its audience uses. Skip listings, marketplaces, outreach and code
-defects.`,
+defects.
+
+Bring 5 to 10 features each run, the most useful first, each its own finding: what users get,
+the surface it adds (function, CLI command, MCP tool) and where the need shows (a similar
+project, a user's question, an official source). A feature resting on domain facts (rules,
+lists, formulas, dates) cites the primary source you fetched for them, so it can be built from
+that source.`,
     all: '',
   },
   planner: {
@@ -32,8 +38,12 @@ This phase is about building features, fast. Plan the features the implementer c
 each a capability users get (kind feature or roadmap), the most useful first. Plan a fix only
 when users get a wrong result or a crash on normal input. Leave everything else out (error
 messages, hints, warnings, keywords, docs polish, tests, listings, outreach, decisions only a
-person can make) and leave its items open: they are for a later phase. A feature that needs a
-fact the repository does not contain is still left out.`,
+person can make) and leave its items open: they are for a later phase.
+
+Open every feature the implementer can build now: several per run, not one. A domain fact
+that a research item cites from a primary source counts as known: put the source URL in the
+issue so the implementer builds from it. A feature that needs a fact with no such source is
+left out. A run that opens no feature says why in the summary.`,
     all: '',
   },
 };
